@@ -1,0 +1,890 @@
+import React, { useState } from 'react';
+import {
+  School,
+  Users,
+  Upload,
+  Download,
+  Plus,
+  Trash2,
+  Edit,
+  Save,
+  FileSpreadsheet,
+  CheckCircle,
+  Phone,
+  Mail,
+  Search,
+  Image as ImageIcon,
+  Building,
+  Layers,
+  Eye,
+} from 'lucide-react';
+import { SchoolProfile, Student } from '../types';
+import { excelService } from '../services/gasSync';
+
+interface SchoolAndStudentsTabProps {
+  schoolProfile: SchoolProfile;
+  onUpdateSchool: (updated: SchoolProfile) => void;
+  students: Student[];
+  onUpdateStudents: (updated: Student[]) => void;
+  onTriggerBackup: () => void;
+}
+
+export const SchoolAndStudentsTab: React.FC<SchoolAndStudentsTabProps> = ({
+  schoolProfile,
+  onUpdateSchool,
+  students,
+  onUpdateStudents,
+  onTriggerBackup,
+}) => {
+  const [profileForm, setProfileForm] = useState<SchoolProfile>({ ...schoolProfile });
+  const [isSavedSchool, setIsSavedSchool] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedClass, setSelectedClass] = useState('all');
+  const [isStudentModalOpen, setIsStudentModalOpen] = useState(false);
+  const [editingStudent, setEditingStudent] = useState<Student | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [newClassName, setNewClassName] = useState('');
+
+  // Distinct classes
+  const classes = Array.from(new Set(students.map((s) => s.classRoom).filter(Boolean))).sort();
+
+  // Filtered students
+  const filteredStudents = students.filter((s) => {
+    const matchesSearch =
+      s.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      s.nisn.includes(searchTerm) ||
+      s.classRoom.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesClass = selectedClass === 'all' || s.classRoom === selectedClass;
+    return matchesSearch && matchesClass;
+  });
+
+  const handleSaveSchool = (e: React.FormEvent) => {
+    e.preventDefault();
+    onUpdateSchool(profileForm);
+    setIsSavedSchool(true);
+    onTriggerBackup();
+    setTimeout(() => setIsSavedSchool(false), 2500);
+  };
+
+  const handleLogoUpload = (
+    e: React.ChangeEvent<HTMLInputElement>,
+    field: 'schoolLogo' | 'pemkotLogo'
+  ) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      alert('Harap pilih file gambar (PNG, JPG, SVG, atau WEBP).');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      if (typeof event.target?.result === 'string') {
+        setProfileForm((prev) => ({ ...prev, [field]: event.target?.result as string }));
+      }
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  const handleAddClass = (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = newClassName.trim().toUpperCase();
+    if (!trimmed) return;
+    if (classes.includes(trimmed)) {
+      alert(`Kelas ${trimmed} sudah ada.`);
+      return;
+    }
+    setSelectedClass(trimmed);
+    setNewClassName('');
+    alert(`Kelas ${trimmed} berhasil ditambahkan! Silakan tambahkan siswa ke kelas ini.`);
+  };
+
+  const handleDeleteStudent = (id: string) => {
+    if (confirm('Yakin ingin menghapus siswa ini dari daftar?')) {
+      onUpdateStudents(students.filter((s) => s.id !== id));
+      onTriggerBackup();
+    }
+  };
+
+  const handleSaveStudent = (student: Student) => {
+    const exists = students.some((s) => s.id === student.id);
+    if (exists) {
+      onUpdateStudents(students.map((s) => (s.id === student.id ? student : s)));
+    } else {
+      onUpdateStudents([...students, student]);
+    }
+    setIsStudentModalOpen(false);
+    setEditingStudent(null);
+    onTriggerBackup();
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImporting(true);
+    try {
+      const imported = await excelService.parseStudentsFromExcel(file);
+      if (imported.length === 0) {
+        alert('File tidak memuat data siswa.');
+        return;
+      }
+      onUpdateStudents([...students, ...imported]);
+      onTriggerBackup();
+      alert(`Berhasil mengimpor ${imported.length} data siswa dari Excel!`);
+    } catch (err: any) {
+      alert(`Gagal mengimpor file Excel: ${err.message || 'Format tidak cocok'}`);
+    } finally {
+      setImporting(false);
+      e.target.value = '';
+    }
+  };
+
+  return (
+    <div className="space-y-8">
+      {/* 1. School Information & Official Kop Surat Branding */}
+      <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-xs space-y-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-blue-50 border border-blue-200 flex items-center justify-center text-blue-600">
+              <Building className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-slate-900">
+                Menu Unggah Logo &amp; Kop Surat Resmi Sekolah
+              </h2>
+              <p className="text-xs text-slate-500">
+                Atur logo pemkot/dinas, logo sekolah, serta identitas kop resmi untuk naskah soal dan leger nilai
+              </p>
+            </div>
+          </div>
+
+          {isSavedSchool && (
+            <span className="flex items-center gap-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 px-3 py-1.5 rounded-full border border-emerald-200">
+              <CheckCircle className="w-4 h-4" /> Data Kop &amp; Sekolah Tersimpan!
+            </span>
+          )}
+        </div>
+
+        {/* Branding Upload Section: Dua Logo (Pemkot & Sekolah) */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-slate-50/80 p-4 rounded-xl border border-slate-200">
+          {/* Logo Pemkot / Dinas */}
+          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="font-bold text-xs text-slate-800 flex items-center gap-1.5">
+                <ImageIcon className="w-4 h-4 text-blue-600" />
+                Logo Pemkot / Pemerintah Daerah (Kiri Kop)
+              </span>
+              {profileForm.pemkotLogo && (
+                <button
+                  type="button"
+                  onClick={() => setProfileForm({ ...profileForm, pemkotLogo: '' })}
+                  className="text-[10px] text-rose-600 hover:underline"
+                >
+                  Hapus Logo
+                </button>
+              )}
+            </div>
+
+            <div className="flex items-center gap-4">
+              <div className="w-20 h-20 rounded-xl border-2 border-dashed border-slate-300 flex items-center justify-center bg-slate-50 overflow-hidden shrink-0">
+                {profileForm.pemkotLogo ? (
+                  <img
+                    src={profileForm.pemkotLogo}
+                    alt="Logo Pemkot"
+                    className="w-full h-full object-contain p-1"
+                  />
+                ) : (
+                  <span className="text-[10px] text-slate-400 text-center font-medium px-1">
+                    Belum ada logo
+                  </span>
+                )}
+              </div>
+
+              <div className="flex-1 space-y-2">
+                <p className="text-[11px] text-slate-500">
+                  Format PNG / JPG transparan atau SVG. Ditampilkan di sisi kiri kop surat kedinasan.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <label className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 cursor-pointer transition inline-flex items-center gap-1.5">
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>Unggah File Logo</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => handleLogoUpload(e, 'pemkotLogo')}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Logo Sekolah */}
+          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="font-bold text-xs text-slate-800 flex items-center gap-1.5">
+                <School className="w-4 h-4 text-emerald-600" />
+                Logo Sekolah / Satuan Pendidikan (Kanan Kop)
+              </span>
+              {profileForm.schoolLogo && (
+                <button
+                  type="button"
+                  onClick={() => setProfileForm({ ...profileForm, schoolLogo: '' })}
+                  className="text-[10px] text-rose-600 hover:underline"
+                >
+                  Hapus Logo
+                </button>
+              )}
+            </div>
+
+            <div className="flex items-center gap-4">
+              <div className="w-20 h-20 rounded-xl border-2 border-dashed border-slate-300 flex items-center justify-center bg-slate-50 overflow-hidden shrink-0">
+                {profileForm.schoolLogo ? (
+                  <img
+                    src={profileForm.schoolLogo}
+                    alt="Logo Sekolah"
+                    className="w-full h-full object-contain p-1"
+                  />
+                ) : (
+                  <span className="text-[10px] text-slate-400 text-center font-medium px-1">
+                    Belum ada logo
+                  </span>
+                )}
+              </div>
+
+              <div className="flex-1 space-y-2">
+                <p className="text-[11px] text-slate-500">
+                  Format PNG / JPG transparan atau SVG. Ditampilkan di sisi kanan kop surat kedinasan.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <label className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 cursor-pointer transition inline-flex items-center gap-1.5">
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>Unggah File Logo</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => handleLogoUpload(e, 'schoolLogo')}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Live Preview Kop Surat Kedinasan */}
+        <div className="space-y-1.5">
+          <span className="text-[11px] font-bold text-slate-700 flex items-center gap-1">
+            <Eye className="w-3.5 h-3.5 text-blue-600" />
+            Pratinjau Kop Surat Resmi Terkini:
+          </span>
+          <div className="border-2 border-slate-800 rounded-xl p-4 bg-white space-y-2 shadow-xs">
+            <div className="flex items-center justify-between gap-4">
+              <div className="w-16 h-16 shrink-0 flex items-center justify-center">
+                {profileForm.pemkotLogo ? (
+                  <img src={profileForm.pemkotLogo} alt="Logo Pemda" className="max-h-16 max-w-16 object-contain" />
+                ) : (
+                  <div className="w-12 h-12 rounded border border-slate-300 text-[8px] flex items-center justify-center text-slate-400 text-center">
+                    Logo Pemda
+                  </div>
+                )}
+              </div>
+
+              <div className="flex-1 text-center space-y-0.5">
+                <p className="text-xs font-bold uppercase text-slate-800 tracking-wider">
+                  {profileForm.govLevel || 'PEMERINTAH PROVINSI / KABUPATEN / KOTA'}
+                </p>
+                <p className="text-xs font-semibold uppercase text-slate-700">
+                  {profileForm.govDepartment || 'DINAS PENDIDIKAN DAN KEBUDAYAAN'}
+                </p>
+                <p className="text-sm sm:text-base font-black uppercase text-slate-950">
+                  {profileForm.name || 'NAMA SATUAN PENDIDIKAN'}
+                </p>
+                <p className="text-[10px] text-slate-600">
+                  {profileForm.address} • NPSN: {profileForm.npsn} • Telp: {profileForm.schoolPhone || '-'}
+                </p>
+              </div>
+
+              <div className="w-16 h-16 shrink-0 flex items-center justify-center">
+                {profileForm.schoolLogo ? (
+                  <img src={profileForm.schoolLogo} alt="Logo Sekolah" className="max-h-16 max-w-16 object-contain" />
+                ) : (
+                  <div className="w-12 h-12 rounded border border-slate-300 text-[8px] flex items-center justify-center text-slate-400 text-center">
+                    Logo Sekolah
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="border-b-[3px] border-slate-900 pt-1"></div>
+            <div className="border-b border-slate-900 mt-0.5"></div>
+          </div>
+        </div>
+
+        <form onSubmit={handleSaveSchool} className="space-y-4 text-xs">
+          {/* Government Level & Department Fields */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">
+                Tingkat Pemerintahan (Baris 1 Kop)
+              </label>
+              <input
+                type="text"
+                value={profileForm.govLevel || ''}
+                onChange={(e) => setProfileForm({ ...profileForm, govLevel: e.target.value })}
+                placeholder="Contoh: PEMERINTAH PROVINSI DKI JAKARTA"
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 font-medium"
+              />
+            </div>
+
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">
+                Dinas Terkait (Baris 2 Kop)
+              </label>
+              <input
+                type="text"
+                value={profileForm.govDepartment || ''}
+                onChange={(e) => setProfileForm({ ...profileForm, govDepartment: e.target.value })}
+                placeholder="Contoh: DINAS PENDIDIKAN"
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 font-medium"
+              />
+            </div>
+
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">
+                Sub-Unit / Jenjang (Baris 3 Kop)
+              </label>
+              <input
+                type="text"
+                value={profileForm.schoolSubUnit || ''}
+                onChange={(e) => setProfileForm({ ...profileForm, schoolSubUnit: e.target.value })}
+                placeholder="Contoh: SEKOLAH MENENGAH PERTAMA"
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 font-medium"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">Nama Satuan Pendidikan / Sekolah</label>
+              <input
+                type="text"
+                required
+                value={profileForm.name}
+                onChange={(e) => setProfileForm({ ...profileForm, name: e.target.value })}
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 font-semibold"
+              />
+            </div>
+
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">NPSN</label>
+              <input
+                type="text"
+                value={profileForm.npsn}
+                onChange={(e) => setProfileForm({ ...profileForm, npsn: e.target.value })}
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 font-mono"
+              />
+            </div>
+
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">Tahun Ajaran</label>
+              <input
+                type="text"
+                value={profileForm.academicYear}
+                onChange={(e) => setProfileForm({ ...profileForm, academicYear: e.target.value })}
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">Nama Guru Mata Pelajaran</label>
+              <input
+                type="text"
+                value={profileForm.teacherName}
+                onChange={(e) => setProfileForm({ ...profileForm, teacherName: e.target.value })}
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">Nama Kepala Sekolah</label>
+              <input
+                type="text"
+                value={profileForm.headmasterName}
+                onChange={(e) => setProfileForm({ ...profileForm, headmasterName: e.target.value })}
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">Batas KKM Kelulusan (Standar Nilai)</label>
+              <input
+                type="number"
+                min={0}
+                max={100}
+                value={profileForm.defaultKkm}
+                onChange={(e) => setProfileForm({ ...profileForm, defaultKkm: Number(e.target.value) })}
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 font-bold text-blue-700"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="sm:col-span-2">
+              <label className="block font-semibold text-slate-700 mb-1">Alamat Lengkap Sekolah</label>
+              <input
+                type="text"
+                value={profileForm.address}
+                onChange={(e) => setProfileForm({ ...profileForm, address: e.target.value })}
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">Kode Pos</label>
+              <input
+                type="text"
+                value={profileForm.postalCode || ''}
+                onChange={(e) => setProfileForm({ ...profileForm, postalCode: e.target.value })}
+                placeholder="10110"
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 font-mono"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">No. Telepon / Fax</label>
+              <input
+                type="text"
+                value={profileForm.schoolPhone || ''}
+                onChange={(e) => setProfileForm({ ...profileForm, schoolPhone: e.target.value })}
+                placeholder="(021) 3840001"
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">Email Resmi Sekolah</label>
+              <input
+                type="email"
+                value={profileForm.schoolEmail || ''}
+                onChange={(e) => setProfileForm({ ...profileForm, schoolEmail: e.target.value })}
+                placeholder="info@smpn1.sch.id"
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">Laman / Website</label>
+              <input
+                type="text"
+                value={profileForm.schoolWebsite || ''}
+                onChange={(e) => setProfileForm({ ...profileForm, schoolWebsite: e.target.value })}
+                placeholder="https://smpn1.sch.id"
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+          </div>
+
+          <div className="flex justify-end pt-2">
+            <button
+              type="submit"
+              className="px-5 py-2.5 text-xs font-bold rounded-xl bg-slate-900 hover:bg-slate-800 text-white shadow-sm flex items-center gap-2 transition"
+            >
+              <Save className="w-4 h-4 text-blue-400" />
+              <span>Simpan Pengaturan Kop &amp; Profil Sekolah</span>
+            </button>
+          </div>
+        </form>
+      </div>
+
+      {/* 2. Class & Roster Overview */}
+      <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-xs space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-purple-50 border border-purple-200 flex items-center justify-center text-purple-600">
+              <Layers className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-slate-900">Menu Simpan Data Kelas &amp; Rombel</h2>
+              <p className="text-xs text-slate-500">
+                Kelompokkan siswa berdasarkan rombongan belajar untuk distribusi ujian dan pelaporan nilai klasikal
+              </p>
+            </div>
+          </div>
+
+          {/* Quick Add Class Form */}
+          <form onSubmit={handleAddClass} className="flex items-center gap-2">
+            <input
+              type="text"
+              value={newClassName}
+              onChange={(e) => setNewClassName(e.target.value)}
+              placeholder="Tambah Kelas Baru (cth: IX-C)..."
+              className="px-3 py-1.5 text-xs rounded-xl border border-slate-300 focus:ring-2 focus:ring-purple-500"
+            />
+            <button
+              type="submit"
+              className="px-3 py-1.5 text-xs font-semibold rounded-xl bg-purple-600 hover:bg-purple-700 text-white flex items-center gap-1 shadow-2xs transition"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Tambah Kelas</span>
+            </button>
+          </form>
+        </div>
+
+        {/* Class Cards Pill Grid */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-2 pt-1">
+          <div
+            onClick={() => setSelectedClass('all')}
+            className={`p-3 rounded-xl border cursor-pointer transition text-center ${
+              selectedClass === 'all'
+                ? 'bg-purple-50 border-purple-400 text-purple-900 font-bold shadow-2xs'
+                : 'bg-slate-50 border-slate-200 hover:bg-slate-100 text-slate-700'
+            }`}
+          >
+            <span className="text-[10px] text-slate-500 block">Semua Rombel</span>
+            <span className="text-sm font-bold">{students.length} Siswa</span>
+          </div>
+          {classes.map((cls) => {
+            const count = students.filter((s) => s.classRoom === cls).length;
+            const isSelected = selectedClass === cls;
+            return (
+              <div
+                key={cls}
+                onClick={() => setSelectedClass(cls)}
+                className={`p-3 rounded-xl border cursor-pointer transition text-center ${
+                  isSelected
+                    ? 'bg-blue-50 border-blue-400 text-blue-900 font-bold shadow-2xs'
+                    : 'bg-white border-slate-200 hover:bg-slate-50 text-slate-700'
+                }`}
+              >
+                <span className="text-xs font-bold block">Kelas {cls}</span>
+                <span className="text-[11px] text-slate-500">{count} Peserta</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* 2. Student Roster Management */}
+      <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-xs space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center justify-center text-emerald-600">
+              <Users className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-slate-900">Daftar Siswa Peserta Ujian</h2>
+              <p className="text-xs text-slate-500">
+                Kelola data siswa, NISN, kelas, serta nomor WhatsApp &amp; Email orang tua
+              </p>
+            </div>
+          </div>
+
+          {/* Action toolbar */}
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              id="btn-add-student-manual"
+              onClick={() => {
+                setEditingStudent({
+                  id: `std-${Date.now()}`,
+                  nisn: '',
+                  name: '',
+                  gender: 'L',
+                  classRoom: classes[0] || 'IX-A',
+                  parentPhone: '',
+                  parentEmail: '',
+                });
+                setIsStudentModalOpen(true);
+              }}
+              className="px-3 py-2 text-xs font-semibold rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white flex items-center gap-1.5 shadow-xs transition"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Tambah Siswa</span>
+            </button>
+
+            {/* Upload Excel */}
+            <label className="px-3 py-2 text-xs font-semibold rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-300 flex items-center gap-1.5 transition cursor-pointer">
+              <Upload className="w-3.5 h-3.5 text-emerald-600" />
+              <span>{importing ? 'Mengimpor...' : 'Unggah File Excel'}</span>
+              <input
+                type="file"
+                accept=".xlsx,.xls,.csv"
+                onChange={handleFileUpload}
+                className="hidden"
+              />
+            </label>
+
+            {/* Export Excel */}
+            <button
+              onClick={() => excelService.exportStudentsToExcel(students)}
+              className="px-3 py-2 text-xs font-semibold rounded-xl bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 flex items-center gap-1.5 transition"
+            >
+              <Download className="w-3.5 h-3.5 text-slate-500" />
+              <span>Unduh Excel</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Search & Filter */}
+        <div className="flex flex-col sm:flex-row items-center gap-2 pt-2 text-xs">
+          <div className="relative flex-1 w-full">
+            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Cari siswa berdasarkan nama, NISN, atau kelas..."
+              className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-indigo-500"
+            />
+          </div>
+
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <span className="text-slate-500 font-medium shrink-0">Filter Kelas:</span>
+            <select
+              value={selectedClass}
+              onChange={(e) => setSelectedClass(e.target.value)}
+              className="px-3 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-indigo-500 bg-white"
+            >
+              <option value="all">Semua Kelas ({students.length})</option>
+              {classes.map((c) => (
+                <option key={c} value={c}>
+                  Kelas {c} ({students.filter((s) => s.classRoom === c).length})
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {/* Student Table */}
+        <div className="border border-slate-200 rounded-xl overflow-hidden shadow-2xs">
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs text-left">
+              <thead className="bg-slate-50 text-slate-700 font-semibold border-b border-slate-200">
+                <tr>
+                  <th className="px-4 py-3 w-12 text-center">No</th>
+                  <th className="px-4 py-3">NISN</th>
+                  <th className="px-4 py-3">Nama Lengkap Siswa</th>
+                  <th className="px-4 py-3 text-center">L/P</th>
+                  <th className="px-4 py-3">Kelas</th>
+                  <th className="px-4 py-3">No. WhatsApp Orang Tua</th>
+                  <th className="px-4 py-3">Email Orang Tua</th>
+                  <th className="px-4 py-3 text-right">Aksi</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-200 text-slate-700">
+                {filteredStudents.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="px-4 py-8 text-center text-slate-400">
+                      Tidak ada data siswa yang sesuai.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredStudents.map((s, idx) => (
+                    <tr key={s.id} className="hover:bg-slate-50 transition">
+                      <td className="px-4 py-2.5 text-center font-mono text-slate-400">{idx + 1}</td>
+                      <td className="px-4 py-2.5 font-mono font-medium text-indigo-700">{s.nisn}</td>
+                      <td className="px-4 py-2.5 font-semibold text-slate-900">{s.name}</td>
+                      <td className="px-4 py-2.5 text-center">
+                        <span
+                          className={`px-2 py-0.5 rounded-md font-semibold text-[10px] ${
+                            s.gender === 'L' ? 'bg-blue-50 text-blue-700' : 'bg-rose-50 text-rose-700'
+                          }`}
+                        >
+                          {s.gender}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2.5">
+                        <span className="bg-slate-100 text-slate-800 font-semibold px-2 py-0.5 rounded-md">
+                          {s.classRoom}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2.5 font-mono text-slate-600">
+                        {s.parentPhone ? (
+                          <span className="flex items-center gap-1">
+                            <Phone className="w-3 h-3 text-emerald-600" />
+                            {s.parentPhone}
+                          </span>
+                        ) : (
+                          <span className="text-slate-400">-</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-2.5 text-slate-600">
+                        {s.parentEmail ? (
+                          <span className="flex items-center gap-1">
+                            <Mail className="w-3 h-3 text-indigo-500" />
+                            {s.parentEmail}
+                          </span>
+                        ) : (
+                          <span className="text-slate-400">-</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-2.5 text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          <button
+                            onClick={() => {
+                              setEditingStudent(s);
+                              setIsStudentModalOpen(true);
+                            }}
+                            className="p-1.5 text-indigo-600 hover:bg-indigo-50 rounded-lg transition"
+                            title="Edit Data Siswa"
+                          >
+                            <Edit className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteStudent(s.id)}
+                            className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-lg transition"
+                            title="Hapus Siswa"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      {/* Student Form Modal */}
+      {isStudentModalOpen && editingStudent && (
+        <StudentModal
+          student={editingStudent}
+          onSave={handleSaveStudent}
+          onClose={() => {
+            setIsStudentModalOpen(false);
+            setEditingStudent(null);
+          }}
+        />
+      )}
+    </div>
+  );
+};
+
+// Student Edit Modal
+interface StudentModalProps {
+  student: Student;
+  onSave: (s: Student) => void;
+  onClose: () => void;
+}
+
+const StudentModal: React.FC<StudentModalProps> = ({ student, onSave, onClose }) => {
+  const [form, setForm] = useState<Student>({ ...student });
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    onSave(form);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
+      <div className="bg-white w-full max-w-md rounded-2xl shadow-xl border border-slate-200 overflow-hidden">
+        <div className="bg-slate-900 text-white p-4 flex items-center justify-between">
+          <h3 className="text-sm font-bold">
+            {student.name ? 'Edit Data Siswa' : 'Tambah Siswa Baru'}
+          </h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-white">
+            ✕
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="p-5 space-y-3.5 text-xs">
+          <div>
+            <label className="block font-semibold text-slate-700 mb-1">NISN (Nomor Induk Siswa Nasional)</label>
+            <input
+              type="text"
+              required
+              value={form.nisn}
+              onChange={(e) => setForm({ ...form, nisn: e.target.value })}
+              className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-indigo-500 font-mono"
+              placeholder="Contoh: 0089123456"
+            />
+          </div>
+
+          <div>
+            <label className="block font-semibold text-slate-700 mb-1">Nama Lengkap Siswa</label>
+            <input
+              type="text"
+              required
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+              className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-indigo-500"
+              placeholder="Contoh: Muhammad Rizky Pratama"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">Jenis Kelamin</label>
+              <select
+                value={form.gender}
+                onChange={(e) => setForm({ ...form, gender: e.target.value as 'L' | 'P' })}
+                className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-indigo-500 bg-white"
+              >
+                <option value="L">Laki-Laki (L)</option>
+                <option value="P">Perempuan (P)</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">Kelas / Rombel</label>
+              <input
+                type="text"
+                required
+                value={form.classRoom}
+                onChange={(e) => setForm({ ...form, classRoom: e.target.value })}
+                className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-indigo-500"
+                placeholder="Contoh: IX-A"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block font-semibold text-slate-700 mb-1">
+              Nomor WhatsApp Orang Tua / Wali
+            </label>
+            <input
+              type="tel"
+              value={form.parentPhone}
+              onChange={(e) => setForm({ ...form, parentPhone: e.target.value })}
+              className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-indigo-500 font-mono"
+              placeholder="Contoh: 081234567890"
+            />
+          </div>
+
+          <div>
+            <label className="block font-semibold text-slate-700 mb-1">Email Orang Tua / Wali</label>
+            <input
+              type="email"
+              value={form.parentEmail}
+              onChange={(e) => setForm({ ...form, parentEmail: e.target.value })}
+              className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-indigo-500"
+              placeholder="orangtua@gmail.com"
+            />
+          </div>
+
+          <div className="pt-3 border-t border-slate-200 flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 text-xs rounded-xl bg-slate-100 text-slate-700 hover:bg-slate-200"
+            >
+              Batal
+            </button>
+            <button
+              type="submit"
+              className="px-4 py-2 text-xs font-semibold rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 shadow-xs"
+            >
+              Simpan Siswa
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};

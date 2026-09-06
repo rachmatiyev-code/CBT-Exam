@@ -1,0 +1,6 @@
+{
+  "name": "EduCBT AI - Kuis & Ujian Interaktif",
+  "description": "Platform pembuat kuis & ujian interaktif berbasis Apps Script dan Google Sheets, generator soal AI Gemini, penilaian otomatis uraian/isian, mode ujian terisolasi anti-curang, live monitoring, serta remidi dan pengayaan.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
