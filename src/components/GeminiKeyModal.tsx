@@ -12,12 +12,16 @@ export const GeminiKeyModal: React.FC<GeminiKeyModalProps> = ({ isOpen, onClose,
   const [apiKey, setApiKey] = useState('');
   const [showKey, setShowKey] = useState(false);
   const [testing, setTesting] = useState(false);
+  const [hasServerKey, setHasServerKey] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
 
   useEffect(() => {
     if (isOpen) {
       setApiKey(apiService.getStoredApiKey());
       setTestResult(null);
+      apiService.checkServerKeyStatus().then((res) => {
+        setHasServerKey(res.hasServerKey);
+      });
     }
   }, [isOpen]);
 
@@ -27,7 +31,7 @@ export const GeminiKeyModal: React.FC<GeminiKeyModalProps> = ({ isOpen, onClose,
     setTesting(true);
     setTestResult(null);
     try {
-      const res = await apiService.validateKey(apiKey.trim() || undefined);
+      const res = await apiService.validateKey(apiKey.trim());
       setTestResult(res);
     } catch (err: any) {
       setTestResult({
@@ -40,8 +44,9 @@ export const GeminiKeyModal: React.FC<GeminiKeyModalProps> = ({ isOpen, onClose,
   };
 
   const handleSave = () => {
-    apiService.setStoredApiKey(apiKey.trim());
-    onKeySaved(apiKey.trim());
+    const clean = apiKey.trim();
+    apiService.setStoredApiKey(clean);
+    onKeySaved(clean);
     onClose();
   };
 
@@ -76,20 +81,41 @@ export const GeminiKeyModal: React.FC<GeminiKeyModalProps> = ({ isOpen, onClose,
 
         {/* Content */}
         <div className="p-6 space-y-4">
+          {hasServerKey && (
+            <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-xs text-emerald-900 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>
+                  <strong>Kunci Server Bawaan Aktif:</strong> Server telah memiliki konfigurasi Gemini API Key yang siap digunakan.
+                </span>
+              </div>
+              <span className="text-[10px] uppercase font-bold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full">
+                Tersedia
+              </span>
+            </div>
+          )}
+
           <div className="bg-indigo-50/80 border border-indigo-100 rounded-xl p-3.5 text-xs text-indigo-900 flex items-start gap-2.5">
             <Sparkles className="w-4 h-4 text-indigo-600 shrink-0 mt-0.5" />
             <div className="leading-relaxed">
               Kunci API digunakan untuk menghasilkan soal secara otomatis berbasis topik kurikulum, menilai uraian/isian dengan pencocokan kata kunci, dan menyusun program remidi/pengayaan siswa.
               <span className="block mt-1 font-medium text-indigo-700">
-                Catatan: Jika dikosongkan, aplikasi akan menggunakan konfigurasi API server bawaan secara otomatis.
+                Catatan: Masukkan kunci API Anda (tanpa tanda kutip), atau kosongkan untuk otomatis memakai kunci server bawaan.
               </span>
             </div>
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">
-              Google Gemini API Key
-            </label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-xs font-semibold text-slate-700">
+                Google Gemini API Key
+              </label>
+              {apiKey && (
+                <span className="text-[11px] text-indigo-600 font-medium">
+                  Kunci Kustom Terpasang
+                </span>
+              )}
+            </div>
             <div className="relative">
               <input
                 id="input-gemini-key"

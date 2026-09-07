@@ -94,10 +94,16 @@ export default function App() {
   const [activePings, setActivePings] = useState<any[]>([]);
   const [isServerSyncing, setIsServerSyncing] = useState(false);
 
-  // Check Gemini Key presence on load
+  // Check Gemini Key presence on load (custom key or server-side GEMINI_API_KEY)
   useEffect(() => {
     const key = apiService.getStoredApiKey();
-    setHasGeminiKey(!!key);
+    if (key) {
+      setHasGeminiKey(true);
+    } else {
+      apiService.checkServerKeyStatus().then((res) => {
+        setHasGeminiKey(res.hasServerKey);
+      });
+    }
   }, []);
 
   // 1. Initial Centralized Server Sync on App Startup

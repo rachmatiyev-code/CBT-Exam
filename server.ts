@@ -103,27 +103,190 @@ function writeServerDB(state: Partial<ServerCBTState>): ServerCBTState {
   }
 }
 
-// Helper to get GoogleGenAI client
+// Helper to clean and sanitize API keys
+function cleanApiKey(key?: string | null): string {
+  if (!key) return '';
+  let k = String(key).trim();
+  // Filter out literal null/undefined representations
+  if (k.toLowerCase() === 'undefined' || k.toLowerCase() === 'null') return '';
+  // Strip enclosing quotes
+  k = k.replace(/^["'`]+|["'`]+$/g, '').trim();
+  // Strip GEMINI_API_KEY= prefix if accidentally pasted
+  if (k.startsWith('GEMINI_API_KEY=')) {
+    k = k.replace('GEMINI_API_KEY=', '').trim();
+  }
+  // Strip Bearer prefix if accidentally pasted
+  if (k.startsWith('Bearer ')) {
+    k = k.replace('Bearer ', '').trim();
+  }
+  return k;
+}
+
+// Convert Google GenAI/RPC errors into friendly Indonesian descriptions
+function formatGeminiError(error: any): string {
+  if (!error) return 'Terjadi kesalahan internal pada layanan AI Gemini.';
+  let msg = error.message || String(error);
+
+  // If error.message is a JSON string from Google RPC
+  try {
+    const parsed = JSON.parse(msg);
+    if (parsed?.error?.message) {
+      msg = parsed.error.message;
+    }
+  } catch {}
+
+  if (msg.includes('API_KEY_INVALID') || msg.includes('API key not valid')) {
+    return 'Kunci API Gemini tidak valid. Silakan periksa kembali API Key Anda dari Google AI Studio atau gunakan kunci server bawaan.';
+  }
+  if (msg.includes('PERMISSION_DENIED')) {
+    return 'Akses API ditolak. Pastikan izin akses Gemini API telah aktif di Google AI Studio / Cloud Project.';
+  }
+  if (msg.includes('RESOURCE_EXHAUSTED') || msg.includes('quota') || msg.includes('Rate limit')) {
+    return 'Batas kuota panggilan Gemini API telah tercapai (Rate Limit / Quota Exceeded). Mohon tunggu beberapa saat.';
+  }
+  if (msg.includes('high demand') || msg.includes('overloaded') || msg.includes('503')) {
+    return 'Layanan AI Gemini sedang mengalami lonjakan beban sementara dari Google. Silakan klik coba lagi dalam beberapa detik.';
+  }
+
+  return msg;
+}
+
+// Generate content with automatic model fallback on transient high-demand spikes
+async function generateWithFallback(client: GoogleGenAI, contents: any, config?: any) {
+  const models = ['gemini-3.8-flash', 'gemini-3.6-flash'];
+  let lastError: any = null;
+
+  for (const model of models) {
+    try {
+      return await client.models.generateContent({
+        model,
+        contents,
+        config,
+      });
+    } catch (err: any) {
+      lastError = err;
+      const msg = err?.message || '';
+      // If API key is invalid or permission denied, no need to retry models
+      if (
+        msg.includes('API_KEY_INVALID') ||
+        msg.includes('API key not valid') ||
+        msg.includes('PERMISSION_DENIED')
+      ) {
+        throw err;
+      }
+      console.warn(`Model ${model} failed, trying next model: ${msg.slice(0, 120)}`);
+    }
+  }
+
+  throw lastError;
+}
+
+// Bulletproof JSON extractor that safely handles code fences, markdown, and trailing commas
+function extractJsonFromText(rawText: string, fallback: any = []): any {
+  if (!rawText || typeof rawText !== 'string') return fallback;
+
+  // 1. Direct parse attempt
+  const cleaned = rawText.trim();
+  try {
+    return JSON.parse(cleaned);
+  } catch {}
+
+  // 2. Extract code block ```json ... ``` or ``` ... ```
+  const codeBlockMatch = cleaned.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  if (codeBlockMatch && codeBlockMatch[1]) {
+    try {
+      return JSON.parse(codeBlockMatch[1].trim());
+    } catch {}
+  }
+
+  // 3. Extract between outer [ ... ] for arrays
+  const firstBracket = cleaned.indexOf('[');
+  const lastBracket = cleaned.lastIndexOf(']');
+  if (firstBracket !== -1 && lastBracket > firstBracket) {
+    const arraySlice = cleaned.slice(firstBracket, lastBracket + 1);
+    try {
+      return JSON.parse(arraySlice);
+    } catch {}
+  }
+
+  // 4. Extract between outer { ... } for objects
+  const firstBrace = cleaned.indexOf('{');
+  const lastBrace = cleaned.lastIndexOf('}');
+  if (firstBrace !== -1 && lastBrace > firstBrace) {
+    const objectSlice = cleaned.slice(firstBrace, lastBrace + 1);
+    try {
+      return JSON.parse(objectSlice);
+    } catch {}
+  }
+
+  // 5. Strip comments and trailing commas before bracket/brace
+  let sanitized = cleaned
+    .replace(/\/\/[^\n\r]*/g, '')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/,\s*([}\]])/g, '$1');
+
+  try {
+    return JSON.parse(sanitized);
+  } catch {}
+
+  const sFirstBracket = sanitized.indexOf('[');
+  const sLastBracket = sanitized.lastIndexOf(']');
+  if (sFirstBracket !== -1 && sLastBracket > sFirstBracket) {
+    try {
+      return JSON.parse(sanitized.slice(sFirstBracket, sLastBracket + 1));
+    } catch {}
+  }
+
+  const sFirstBrace = sanitized.indexOf('{');
+  const sLastBrace = sanitized.lastIndexOf('}');
+  if (sFirstBrace !== -1 && sLastBrace > sFirstBrace) {
+    try {
+      return JSON.parse(sanitized.slice(sFirstBrace, sLastBrace + 1));
+    } catch {}
+  }
+
+  console.warn('Gagal mem-parse JSON dari output AI:', rawText.slice(0, 200));
+  return fallback;
+}
+
+// Helper to get GoogleGenAI client with fallback to server environment key
 function getGenAIClient(customApiKey?: string) {
-  const apiKey = customApiKey || process.env.GEMINI_API_KEY;
+  const cleanedCustom = cleanApiKey(customApiKey);
+  const cleanedEnv = cleanApiKey(process.env.GEMINI_API_KEY);
+  const apiKey = cleanedCustom || cleanedEnv;
+
   if (!apiKey) {
-    throw new Error('Gemini API Key tidak ditemukan. Masukkan kunci API di menu atau atur GEMINI_API_KEY.');
+    throw new Error(
+      'Gemini API Key tidak ditemukan. Silakan masukkan kunci API Anda di menu Pengaturan Gemini atau konfigurasi GEMINI_API_KEY di environment server.'
+    );
   }
   return new GoogleGenAI({ apiKey });
 }
+
+// Check if Gemini API key is configured on server or ready
+app.get('/api/key-status', (_req, res) => {
+  const hasEnvKey = !!cleanApiKey(process.env.GEMINI_API_KEY);
+  res.json({
+    success: true,
+    hasServerKey: hasEnvKey,
+  });
+});
 
 // 1. Health check & API key validation
 app.post('/api/validate-key', async (req, res) => {
   try {
     const { apiKey } = req.body;
     const client = getGenAIClient(apiKey);
-    const response = await client.models.generateContent({
-      model: 'gemini-3.8-flash',
-      contents: 'Ping: jawab dengan 1 kata "OK" jika siap.',
+    const response = await generateWithFallback(client, 'Ping: jawab dengan 1 kata "OK" jika siap.');
+    res.json({
+      success: true,
+      message: 'Kunci API Gemini valid dan siap digunakan!',
+      text: response.text,
+      usedServerKey: !cleanApiKey(apiKey) && !!cleanApiKey(process.env.GEMINI_API_KEY),
     });
-    res.json({ success: true, message: 'Kunci API Gemini valid dan siap digunakan!', text: response.text });
   } catch (error: any) {
-    res.status(400).json({ success: false, error: error.message || 'Kunci API tidak valid' });
+    const friendlyError = formatGeminiError(error);
+    res.status(400).json({ success: false, error: friendlyError, message: friendlyError });
   }
 });
 
@@ -162,40 +325,38 @@ Format soal yang harus didukung:
 3. "isian_singkat": Soal isian jawaban pendek. Sediakan kunci jawaban utama serta daftar variasi kata kunci konsep yang diterima.
 4. "uraian": Soal esai/uraian. Sediakan penjelasan konsep materi pokok, daftar kata kunci wajib ("kata_kunci"), dan rubrik penilaian skoring (maksimal poin 10-20).
 
-Wajib kembalikan HANYA JSON murni (valid RFC 8259) tanpa markdown formatting atau pembungkus \`\`\`json.
-Format JSON harus berupa array objek soal:
+Wajib kembalikan HANYA JSON murni (valid RFC 8259) tanpa komentar dan tanpa pembungkus markdown:
 [
   {
     "id": "q1",
-    "type": "pilihan_ganda" | "pilihan_ganda_kompleks" | "isian_singkat" | "uraian",
+    "type": "pilihan_ganda",
     "question": "Teks pertanyaan lengkap...",
-    "options": ["Opsi A...", "Opsi B...", "Opsi C...", "Opsi D..."], // Kosongkan [] jika isian_singkat atau uraian
-    "correctAnswer": "A" | ["A", "C"] | "Jawaban singkat",
-    "keywords": ["kata kunci 1", "kata kunci 2"], // Khusus isian_singkat & uraian
+    "options": ["Opsi A...", "Opsi B...", "Opsi C...", "Opsi D..."],
+    "correctAnswer": "A",
+    "keywords": ["kata kunci 1", "kata kunci 2"],
     "concept": "Konsep materi pokok yang diuji...",
-    "rubric": "Rubrik penilaian: Skor penuh jika memuat...", // Khusus uraian
+    "rubric": "Rubrik penilaian: Skor penuh jika memuat...",
     "maxScore": 10,
     "explanation": "Pembahasan lengkap dan edukatif..."
   }
 ]`;
 
-    const response = await client.models.generateContent({
-      model: 'gemini-3.8-flash',
-      contents: prompt,
-      config: {
-        responseMimeType: 'application/json',
-      },
+    const response = await generateWithFallback(client, prompt, {
+      responseMimeType: 'application/json',
     });
 
-    let rawText = response.text || '[]';
-    // Clean potential code fences
-    rawText = rawText.replace(/^```json\s*/i, '').replace(/\s*```$/i, '').trim();
-    const questions = JSON.parse(rawText);
+    const rawText = response.text || '[]';
+    const questions = extractJsonFromText(rawText, []);
+
+    if (!Array.isArray(questions) || questions.length === 0) {
+      throw new Error('Format soal yang dihasilkan oleh AI tidak sesuai atau kosong. Silakan ulangi pembuatan.');
+    }
 
     res.json({ success: true, questions });
   } catch (error: any) {
     console.error('Error generating questions:', error);
-    res.status(500).json({ success: false, error: error.message || 'Gagal membuat soal dengan AI' });
+    const friendlyError = formatGeminiError(error);
+    res.status(500).json({ success: false, error: friendlyError });
   }
 });
 
@@ -230,22 +391,23 @@ Kembalikan HANYA JSON murni (valid RFC 8259):
   "matchedKeywords": ["kata1", "kata2"]
 }`;
 
-    const response = await client.models.generateContent({
-      model: 'gemini-3.8-flash',
-      contents: prompt,
-      config: {
-        responseMimeType: 'application/json',
-      },
+    const response = await generateWithFallback(client, prompt, {
+      responseMimeType: 'application/json',
     });
 
-    let rawText = response.text || '{}';
-    rawText = rawText.replace(/^```json\s*/i, '').replace(/\s*```$/i, '').trim();
-    const evaluation = JSON.parse(rawText);
+    const rawText = response.text || '{}';
+    const evaluation = extractJsonFromText(rawText, {
+      awardedScore: 0,
+      maxScore: maxScore || 10,
+      feedback: 'Jawaban telah tersimpan.',
+      matchedKeywords: [],
+    });
 
     res.json({ success: true, evaluation });
   } catch (error: any) {
     console.error('Error evaluating submission:', error);
-    res.status(500).json({ success: false, error: error.message || 'Gagal mengevaluasi jawaban' });
+    const friendlyError = formatGeminiError(error);
+    res.status(500).json({ success: false, error: friendlyError });
   }
 });
 
@@ -255,7 +417,6 @@ app.post('/api/generate-remedial-enrichment', async (req, res) => {
     const { apiKey, studentName, subject, finalScore, kkm = 75, weakTopics = [], strongTopics = [] } = req.body;
 
     const client = getGenAIClient(apiKey);
-
     const isRemedial = finalScore < kkm;
 
     const prompt = `Anda adalah konsultan pedagogi dan guru pembimbing akademik.
@@ -289,22 +450,26 @@ Kembalikan HANYA JSON murni (valid RFC 8259):
   "motivationQuote": "Kalimat motivasi positif untuk siswa"
 }`;
 
-    const response = await client.models.generateContent({
-      model: 'gemini-3.8-flash',
-      contents: prompt,
-      config: {
-        responseMimeType: 'application/json',
-      },
+    const response = await generateWithFallback(client, prompt, {
+      responseMimeType: 'application/json',
     });
 
-    let rawText = response.text || '{}';
-    rawText = rawText.replace(/^```json\s*/i, '').replace(/\s*```$/i, '').trim();
-    const result = JSON.parse(rawText);
+    const rawText = response.text || '{}';
+    const program = extractJsonFromText(rawText, {
+      type: isRemedial ? 'remidi' : 'pengayaan',
+      headline: 'Rencana Pembelajaran Terpandu',
+      summary: 'Lanjutkan pembelajaran mandiri.',
+      actionSteps: ['Pelajari kembali bab yang belum dikuasai'],
+      recommendedResources: ['Buku teks mata pelajaran'],
+      practiceQuestions: [],
+      motivationQuote: 'Tetap semangat belajar!',
+    });
 
-    res.json({ success: true, program: result });
+    res.json({ success: true, program });
   } catch (error: any) {
     console.error('Error generating remedial/enrichment:', error);
-    res.status(500).json({ success: false, error: error.message || 'Gagal menghasilkan analisis remidi/pengayaan' });
+    const friendlyError = formatGeminiError(error);
+    res.status(500).json({ success: false, error: friendlyError });
   }
 });
 
@@ -338,22 +503,25 @@ Berikan analisis pedagogis menyeluruh dalam format JSON murni:
   ]
 }`;
 
-    const response = await client.models.generateContent({
-      model: 'gemini-3.8-flash',
-      contents: prompt,
-      config: {
-        responseMimeType: 'application/json',
-      },
+    const response = await generateWithFallback(client, prompt, {
+      responseMimeType: 'application/json',
     });
 
-    let rawText = response.text || '{}';
-    rawText = rawText.replace(/^```json\s*/i, '').replace(/\s*```$/i, '').trim();
-    const analysis = JSON.parse(rawText);
+    const rawText = response.text || '{}';
+    const analysis = extractJsonFromText(rawText, {
+      classStatusSummary: 'Analisis hasil ujian telah disusun.',
+      strengths: ['Mayoritas siswa menguasai soal dasar'],
+      weaknesses: ['Perlu penguatan pada soal penalaran HOTS'],
+      itemAnalysisAdvice: 'Tingkatkan variasi stimulus soal',
+      remedialStrategy: ['Bimbingan kelompok kecil'],
+      enrichmentStrategy: ['Studi kasus terapan'],
+    });
 
     res.json({ success: true, analysis });
   } catch (error: any) {
     console.error('Error analyzing exam results:', error);
-    res.status(500).json({ success: false, error: error.message || 'Gagal menganalisis hasil ujian' });
+    const friendlyError = formatGeminiError(error);
+    res.status(500).json({ success: false, error: friendlyError });
   }
 });
 

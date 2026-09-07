@@ -10,23 +10,84 @@ export interface GenerateQuestionsParams {
   customPrompt?: string;
 }
 
+function cleanClientKey(key?: string | null): string {
+  if (!key) return '';
+  let k = String(key).trim();
+  if (k.toLowerCase() === 'undefined' || k.toLowerCase() === 'null') return '';
+  k = k.replace(/^["'`]+|["'`]+$/g, '').trim();
+  if (k.startsWith('GEMINI_API_KEY=')) {
+    k = k.replace('GEMINI_API_KEY=', '').trim();
+  }
+  if (k.startsWith('Bearer ')) {
+    k = k.replace('Bearer ', '').trim();
+  }
+  return k;
+}
+
+async function safeParseResponse(res: Response, defaultError: string): Promise<any> {
+  const text = await res.text();
+  let data: any = null;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    if (text.includes('<!DOCTYPE') || text.includes('<html')) {
+      throw new Error(`Server mengembalikan respon halaman web (Status: ${res.status}). Pastikan endpoint backend berjalan.`);
+    }
+    throw new Error(`${defaultError} (Respon server tidak valid)`);
+  }
+  return data;
+}
+
 export const apiService = {
   getStoredApiKey(): string {
-    return localStorage.getItem('educbt_gemini_api_key') || '';
+    const raw = localStorage.getItem('educbt_gemini_api_key') || '';
+    return cleanClientKey(raw);
   },
 
   setStoredApiKey(key: string): void {
-    localStorage.setItem('educbt_gemini_api_key', key.trim());
+    const cleaned = cleanClientKey(key);
+    if (!cleaned) {
+      localStorage.removeItem('educbt_gemini_api_key');
+    } else {
+      localStorage.setItem('educbt_gemini_api_key', cleaned);
+    }
+  },
+
+  async checkServerKeyStatus(): Promise<{ success: boolean; hasServerKey: boolean }> {
+    try {
+      const res = await fetch('/api/key-status');
+      if (!res.ok) return { success: false, hasServerKey: false };
+      return await res.json();
+    } catch {
+      return { success: false, hasServerKey: false };
+    }
   },
 
   async validateKey(customKey?: string): Promise<{ success: boolean; message: string }> {
-    const apiKey = customKey || this.getStoredApiKey();
-    const res = await fetch('/api/validate-key', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ apiKey }),
-    });
-    return res.json();
+    const apiKey = customKey !== undefined ? cleanClientKey(customKey) : this.getStoredApiKey();
+    try {
+      const res = await fetch('/api/validate-key', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apiKey }),
+      });
+      const data = await safeParseResponse(res, 'Gagal memvalidasi kunci API');
+      if (!data) {
+        return { success: false, message: 'Server tidak merespons.' };
+      }
+      if (!data.success) {
+        return { success: false, message: data.error || data.message || 'Kunci API tidak valid.' };
+      }
+      return {
+        success: true,
+        message: data.message || 'Kunci API Gemini valid dan siap digunakan!',
+      };
+    } catch (e: any) {
+      return {
+        success: false,
+        message: e.message || 'Gagal menghubungi server.',
+      };
+    }
   },
 
   async generateQuestions(params: GenerateQuestionsParams): Promise<any> {
@@ -39,7 +100,7 @@ export const apiService = {
         ...params,
       }),
     });
-    const data = await res.json();
+    const data = await safeParseResponse(res, 'Gagal generate soal');
     if (!data.success) {
       throw new Error(data.error || 'Gagal generate soal');
     }
@@ -64,7 +125,7 @@ export const apiService = {
         ...params,
       }),
     });
-    const data = await res.json();
+    const data = await safeParseResponse(res, 'Gagal menganalisis hasil ujian');
     if (!data.success) {
       throw new Error(data.error || 'Gagal menganalisis hasil ujian');
     }
@@ -89,7 +150,7 @@ export const apiService = {
         ...params,
       }),
     });
-    const data = await res.json();
+    const data = await safeParseResponse(res, 'Gagal evaluasi jawaban');
     if (!data.success) {
       throw new Error(data.error || 'Gagal evaluasi jawaban');
     }
@@ -113,7 +174,7 @@ export const apiService = {
         ...params,
       }),
     });
-    const data = await res.json();
+    const data = await safeParseResponse(res, 'Gagal membuat program remidi/pengayaan');
     if (!data.success) {
       throw new Error(data.error || 'Gagal membuat program remidi/pengayaan');
     }
@@ -126,7 +187,7 @@ export const apiService = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action, payload, webAppUrl }),
     });
-    return res.json();
+    return safeParseResponse(res, 'Gagal sinkronisasi Google Apps Script');
   },
 
   // ==========================================
