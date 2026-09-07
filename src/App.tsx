@@ -28,6 +28,7 @@ import { GeminiKeyModal } from './components/GeminiKeyModal';
 import { GoogleIntegrationModal } from './components/GoogleIntegrationModal';
 import { AiQuestionModal } from './components/AiQuestionModal';
 import { PrintReportModal } from './components/PrintReportModal';
+import { ShareStudentLinkModal } from './components/ShareStudentLinkModal';
 import { CheckCircle, X } from 'lucide-react';
 
 export default function App() {
@@ -75,6 +76,7 @@ export default function App() {
   const [isGeminiModalOpen, setIsGeminiModalOpen] = useState(false);
   const [isGoogleModalOpen, setIsGoogleModalOpen] = useState(false);
   const [isAiQuestionModalOpen, setIsAiQuestionModalOpen] = useState(false);
+  const [isShareLinkModalOpen, setIsShareLinkModalOpen] = useState(false);
   const [backupToast, setBackupToast] = useState<string | null>(null);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
@@ -261,20 +263,13 @@ export default function App() {
     );
   };
 
-  // If student mode is active in this tab
+  // If student mode is active in this tab (via ?mode=siswa or launch button)
   if (isStudentModeActive) {
     return (
       <StudentExamView
         exam={exam}
         students={students}
         onFinishExam={handleFinishStudentExam}
-        onExit={() => {
-          if (isUrlStudentMode) {
-            window.location.href = window.location.pathname;
-          } else {
-            setIsStudentModeActive(false);
-          }
-        }}
       />
     );
   }
@@ -344,6 +339,7 @@ export default function App() {
           activePingsCount={activePings.length}
           onOpenGeminiModal={() => setIsGeminiModalOpen(true)}
           onOpenGoogleModal={() => setIsGoogleModalOpen(true)}
+          onOpenShareLinkModal={() => setIsShareLinkModalOpen(true)}
           onLaunchStudentMode={handleLaunchStudentMode}
           onToggleMobileSidebar={() => setMobileSidebarOpen(!mobileSidebarOpen)}
         />
@@ -399,6 +395,7 @@ export default function App() {
               googleSettings={googleSettings}
               onOpenAiGenerator={() => setIsAiQuestionModalOpen(true)}
               onOpenGoogleModal={() => setIsGoogleModalOpen(true)}
+              onOpenShareLinkModal={() => setIsShareLinkModalOpen(true)}
               onNavigateTab={setActiveTab}
               onOpenPrintModal={(type, session) => {
                 setPrintConfig({ isOpen: true, type, session });
@@ -489,6 +486,7 @@ export default function App() {
               activePings={activePings}
               onRefreshLive={handleRefreshLiveSessions}
               isSyncing={isServerSyncing}
+              onOpenShareLinkModal={() => setIsShareLinkModalOpen(true)}
               onUpdateSession={(updated) => {
                 setSessions(sessions.map((s) => (s.id === updated.id ? updated : s)));
                 triggerAutoBackup();
@@ -575,6 +573,14 @@ export default function App() {
           onClose={() => setPrintConfig({ ...printConfig, isOpen: false })}
         />
       )}
+
+      {/* 5. Dedicated Share Student Mode Link Modal */}
+      <ShareStudentLinkModal
+        isOpen={isShareLinkModalOpen}
+        onClose={() => setIsShareLinkModalOpen(false)}
+        exam={exam}
+        schoolProfile={schoolProfile}
+      />
     </div>
   );
 }

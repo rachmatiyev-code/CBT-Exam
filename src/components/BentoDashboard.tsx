@@ -15,6 +15,7 @@ import {
   Clock,
   ChevronRight,
   ShieldAlert,
+  Share2,
 } from 'lucide-react';
 import { Exam, SchoolProfile, Student, StudentExamSession, AppsScriptSettings } from '../types';
 import { excelService } from '../services/gasSync';
@@ -27,6 +28,7 @@ interface BentoDashboardProps {
   googleSettings: AppsScriptSettings;
   onOpenAiGenerator: () => void;
   onOpenGoogleModal: () => void;
+  onOpenShareLinkModal?: () => void;
   onNavigateTab: (tab: 'questions' | 'students' | 'monitoring' | 'results') => void;
   onOpenPrintModal: (type: 'individual' | 'classical', session?: StudentExamSession) => void;
   onTriggerBackup: () => void;
@@ -41,6 +43,7 @@ export const BentoDashboard: React.FC<BentoDashboardProps> = ({
   googleSettings,
   onOpenAiGenerator,
   onOpenGoogleModal,
+  onOpenShareLinkModal,
   onNavigateTab,
   onOpenPrintModal,
   onTriggerBackup,
@@ -271,12 +274,23 @@ export const BentoDashboard: React.FC<BentoDashboardProps> = ({
           </div>
         </div>
 
-        <div className="pt-3 border-t border-slate-100">
+        <div className="pt-3 border-t border-slate-100 flex flex-col sm:flex-row items-center gap-2">
+          {onOpenShareLinkModal && (
+            <button
+              onClick={onOpenShareLinkModal}
+              className="w-full sm:w-1/2 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl transition flex items-center justify-center gap-1.5 shadow-2xs"
+            >
+              <Share2 className="w-3.5 h-3.5" />
+              <span>Bagikan Link Siswa</span>
+            </button>
+          )}
           <button
             onClick={() => onNavigateTab('monitoring')}
-            className="w-full py-2 text-xs font-semibold text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-xl transition flex items-center justify-center gap-1"
+            className={`w-full ${
+              onOpenShareLinkModal ? 'sm:w-1/2' : ''
+            } py-2 text-xs font-semibold text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-xl transition flex items-center justify-center gap-1`}
           >
-            <span>Buka Dashboard Monitoring Lengkap</span>
+            <span>Live Monitoring</span>
             <ChevronRight className="w-3.5 h-3.5" />
           </button>
         </div>

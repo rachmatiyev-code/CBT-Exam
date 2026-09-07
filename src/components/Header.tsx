@@ -7,6 +7,7 @@ import {
   Sparkles,
   CloudCheck,
   ShieldAlert,
+  Share2,
 } from 'lucide-react';
 import { SchoolProfile, Exam } from '../types';
 
@@ -17,6 +18,7 @@ interface HeaderProps {
   activePingsCount?: number;
   onOpenGeminiModal: () => void;
   onOpenGoogleModal: () => void;
+  onOpenShareLinkModal: () => void;
   onLaunchStudentMode: (newTab?: boolean) => void;
   onToggleMobileSidebar: () => void;
 }
@@ -28,6 +30,7 @@ export const Header: React.FC<HeaderProps> = ({
   activePingsCount = 0,
   onOpenGeminiModal,
   onOpenGoogleModal,
+  onOpenShareLinkModal,
   onLaunchStudentMode,
   onToggleMobileSidebar,
 }) => {
@@ -84,6 +87,18 @@ export const Header: React.FC<HeaderProps> = ({
           ) : (
             <span className="text-amber-600 font-medium text-[11px]">Belum Ada</span>
           )}
+        </button>
+
+        {/* Share Student Link Modal Trigger */}
+        <button
+          id="header-btn-share-link"
+          onClick={onOpenShareLinkModal}
+          className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs px-3 sm:px-3.5 py-2 rounded-xl font-bold tracking-tight shadow-xs flex items-center gap-1.5 transition active:scale-95"
+          title="Buka Tautan & Kode Ujian Khusus Siswa (Siap Dibagikan ke WA/Classroom)"
+        >
+          <Share2 className="w-3.5 h-3.5" />
+          <span className="hidden sm:inline">Bagikan Link Siswa</span>
+          <span className="sm:hidden">Link Siswa</span>
         </button>
 
         {/* Student Mode Button Group */}

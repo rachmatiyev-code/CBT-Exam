@@ -24,14 +24,13 @@ interface StudentExamViewProps {
   exam: Exam;
   students: Student[];
   onFinishExam: (session: StudentExamSession) => void;
-  onExit: () => void;
+  onExit?: () => void;
 }
 
 export const StudentExamView: React.FC<StudentExamViewProps> = ({
   exam: initialExam,
   students: initialStudents,
   onFinishExam,
-  onExit,
 }) => {
   // Server-synced active exam & students roster
   const [exam, setExam] = useState<Exam>(initialExam);
@@ -81,8 +80,9 @@ export const StudentExamView: React.FC<StudentExamViewProps> = ({
               setSelectedStudent(res.students[0]);
             }
           }
-          if (!urlToken && res.exam.token) {
-            setEnteredToken(res.exam.token);
+          {/* If token was not in URL params, leave input empty so student enters token provided by teacher */}
+          if (urlToken) {
+            setEnteredToken(urlToken.trim().toUpperCase());
           }
           setRemainingSeconds(res.exam.durationMinutes * 60);
           setServerSynced(true);
@@ -512,16 +512,10 @@ export const StudentExamView: React.FC<StudentExamViewProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center justify-between pt-2">
-            <button
-              onClick={onExit}
-              className="px-4 py-2 text-xs font-semibold rounded-xl text-slate-400 hover:text-white hover:bg-slate-700 transition"
-            >
-              Kembali ke Dashboard
-            </button>
+          <div className="pt-2">
             <button
               onClick={handleStartExam}
-              className="px-6 py-2.5 text-xs font-bold rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg flex items-center gap-2 transition"
+              className="w-full py-3.5 text-sm font-bold rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg flex items-center justify-center gap-2 transition active:scale-98"
             >
               <span>Masuk &amp; Mulai Ujian</span>
               <ChevronRight className="w-4 h-4" />
@@ -582,12 +576,24 @@ export const StudentExamView: React.FC<StudentExamViewProps> = ({
             </div>
           </div>
 
-          <button
-            onClick={onExit}
-            className="w-full py-3 text-xs font-bold rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg transition"
-          >
-            Selesai &amp; Keluar dari Mode Ujian
-          </button>
+          <div className="pt-2 space-y-2">
+            <button
+              onClick={() => {
+                if (window.opener) {
+                  window.close();
+                } else {
+                  // Reload in clean student mode standby
+                  window.location.href = `${window.location.origin}${window.location.pathname}?mode=siswa`;
+                }
+              }}
+              className="w-full py-3 text-xs font-bold rounded-xl bg-slate-700 hover:bg-slate-600 text-white shadow-md transition"
+            >
+              Tutup Halaman Ujian
+            </button>
+            <p className="text-[11px] text-slate-500 text-center">
+              Seluruh lembar jawaban Anda telah tersimpan. Silakan tutup jendela atau tab peramban ini.
+            </p>
+          </div>
         </div>
       </div>
     );

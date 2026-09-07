@@ -17,6 +17,7 @@ import {
   X,
   FileSpreadsheet,
   RefreshCw,
+  Share2,
 } from 'lucide-react';
 import { Exam, Student, StudentExamSession } from '../types';
 
@@ -33,6 +34,7 @@ interface LiveMonitoringTabProps {
   }>;
   onRefreshLive?: () => void;
   isSyncing?: boolean;
+  onOpenShareLinkModal?: () => void;
   onUpdateSession: (updated: StudentExamSession) => void;
   onDeleteSession: (sessionId: string) => void;
   onSelectStudentForDetail: (session: StudentExamSession) => void;
@@ -45,6 +47,7 @@ export const LiveMonitoringTab: React.FC<LiveMonitoringTabProps> = ({
   activePings = [],
   onRefreshLive,
   isSyncing = false,
+  onOpenShareLinkModal,
   onUpdateSession,
   onDeleteSession,
   onSelectStudentForDetail,
@@ -172,6 +175,17 @@ export const LiveMonitoringTab: React.FC<LiveMonitoringTabProps> = ({
         </div>
 
         <div className="flex items-center gap-2 w-full sm:w-auto overflow-x-auto">
+          {onOpenShareLinkModal && (
+            <button
+              onClick={onOpenShareLinkModal}
+              className="px-3 py-1.5 rounded-xl font-bold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 flex items-center gap-1.5 transition text-xs shadow-2xs whitespace-nowrap"
+              title="Bagikan Tautan Ujian & Token ke Siswa"
+            >
+              <Share2 className="w-3.5 h-3.5" />
+              <span>Bagikan Link Siswa</span>
+            </button>
+          )}
+
           {onRefreshLive && (
             <button
               onClick={onRefreshLive}
