@@ -17,9 +17,12 @@ import {
   Building,
   Layers,
   Eye,
+  BookmarkPlus,
 } from 'lucide-react';
-import { SchoolProfile, Student } from '../types';
+import { SchoolProfile, Student, StudentDraft } from '../types';
 import { excelService } from '../services/gasSync';
+import { StudentDraftModal } from './StudentDraftModal';
+import { StudentTemplateModal } from './StudentTemplateModal';
 
 interface SchoolAndStudentsTabProps {
   schoolProfile: SchoolProfile;
@@ -44,6 +47,21 @@ export const SchoolAndStudentsTab: React.FC<SchoolAndStudentsTabProps> = ({
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [importing, setImporting] = useState(false);
   const [newClassName, setNewClassName] = useState('');
+  const [isDraftModalOpen, setIsDraftModalOpen] = useState(false);
+  const [isTemplateModalOpen, setIsTemplateModalOpen] = useState(false);
+  const [toastNotification, setToastNotification] = useState<string | null>(null);
+
+  const handleLoadDraftStudent = (draft: StudentDraft, mode: 'append' | 'replace') => {
+    const updated = mode === 'replace' ? draft.students : [...students, ...draft.students];
+    onUpdateStudents(updated);
+    onTriggerBackup();
+  };
+
+  const handleImportTemplateStudents = (imported: Student[], mode: 'append' | 'replace') => {
+    const updated = mode === 'replace' ? imported : [...students, ...imported];
+    onUpdateStudents(updated);
+    onTriggerBackup();
+  };
 
   // Distinct classes
   const classes = Array.from(new Set(students.map((s) => s.classRoom).filter(Boolean))).sort();
@@ -141,6 +159,14 @@ export const SchoolAndStudentsTab: React.FC<SchoolAndStudentsTabProps> = ({
 
   return (
     <div className="space-y-8">
+      {/* Toast Notification */}
+      {toastNotification && (
+        <div className="fixed top-5 right-5 z-50 bg-slate-900 text-white text-xs font-semibold px-4 py-2.5 rounded-xl shadow-lg flex items-center gap-2 border border-slate-700 animate-in fade-in slide-in-from-top-2">
+          <CheckCircle className="w-4 h-4 text-emerald-400" />
+          <span>{toastNotification}</span>
+        </div>
+      )}
+
       {/* 1. School Information & Official Kop Surat Branding */}
       <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-xs space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -585,6 +611,28 @@ export const SchoolAndStudentsTab: React.FC<SchoolAndStudentsTabProps> = ({
 
           {/* Action toolbar */}
           <div className="flex flex-wrap items-center gap-2">
+            {/* Draft Siswa Button */}
+            <button
+              id="btn-open-student-drafts"
+              onClick={() => setIsDraftModalOpen(true)}
+              className="px-3 py-2 text-xs font-semibold rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 flex items-center gap-1.5 transition shadow-2xs"
+              title="Kelola & Simpan Draft Roster Siswa"
+            >
+              <BookmarkPlus className="w-3.5 h-3.5 text-purple-600" />
+              <span>Draft Siswa</span>
+            </button>
+
+            {/* Template Siswa (Unduh & Unggah) Button */}
+            <button
+              id="btn-open-student-templates"
+              onClick={() => setIsTemplateModalOpen(true)}
+              className="px-3 py-2 text-xs font-semibold rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 flex items-center gap-1.5 transition shadow-2xs"
+              title="Unduh & Unggah Template Format Siswa (Excel / CSV)"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+              <span>Template Siswa</span>
+            </button>
+
             <button
               id="btn-add-student-manual"
               onClick={() => {
@@ -606,8 +654,8 @@ export const SchoolAndStudentsTab: React.FC<SchoolAndStudentsTabProps> = ({
             </button>
 
             {/* Upload Excel */}
-            <label className="px-3 py-2 text-xs font-semibold rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-300 flex items-center gap-1.5 transition cursor-pointer">
-              <Upload className="w-3.5 h-3.5 text-emerald-600" />
+            <label className="px-3 py-2 text-xs font-semibold rounded-xl bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 flex items-center gap-1.5 transition cursor-pointer">
+              <Upload className="w-3.5 h-3.5 text-slate-600" />
               <span>{importing ? 'Mengimpor...' : 'Unggah File Excel'}</span>
               <input
                 type="file"
@@ -762,6 +810,31 @@ export const SchoolAndStudentsTab: React.FC<SchoolAndStudentsTabProps> = ({
           }}
         />
       )}
+
+      {/* Student Draft Modal */}
+      <StudentDraftModal
+        isOpen={isDraftModalOpen}
+        onClose={() => setIsDraftModalOpen(false)}
+        students={students}
+        classes={classes}
+        onLoadDraft={handleLoadDraftStudent}
+        onNotification={(msg) => {
+          setToastNotification(msg);
+          setTimeout(() => setToastNotification(null), 3000);
+        }}
+      />
+
+      {/* Student Template Modal */}
+      <StudentTemplateModal
+        isOpen={isTemplateModalOpen}
+        onClose={() => setIsTemplateModalOpen(false)}
+        currentStudentCount={students.length}
+        onImportStudents={handleImportTemplateStudents}
+        onNotification={(msg) => {
+          setToastNotification(msg);
+          setTimeout(() => setToastNotification(null), 3000);
+        }}
+      />
     </div>
   );
 };

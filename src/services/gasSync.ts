@@ -232,79 +232,322 @@ export const excelService = {
     XLSX.writeFile(wb, filename);
   },
 
-  // Parse Excel file for students
+  // Download Question Template (.xlsx or .csv) with sample data for all 4 types
+  downloadQuestionTemplate(format: 'xlsx' | 'csv' = 'xlsx') {
+    const sampleQuestions = [
+      {
+        No: 1,
+        'Bentuk Soal': 'pilihan_ganda',
+        Pertanyaan: 'Organel sel yang berfungsi sebagai pusat respirasi seluler dan penghasil energi utama (ATP) adalah...',
+        'Pilihan A': 'Mitokondria',
+        'Pilihan B': 'Ribosom',
+        'Pilihan C': 'Badan Golgi',
+        'Pilihan D': 'Retikulum Endoplasma',
+        'Pilihan E': '',
+        'Kunci Jawaban': 'A',
+        'Kata Kunci Konsep': 'mitokondria, respirasi sel, ATP, konversi energi',
+        'Konsep Materi': 'Struktur dan Fungsi Organel Sel',
+        'Skor Maks': 10,
+        Pembahasan: 'Mitokondria merupakan organel sel penghasil energi selular utama (ATP) melalui metabolisme respirasi aerob.',
+      },
+      {
+        No: 2,
+        'Bentuk Soal': 'pilihan_ganda_kompleks',
+        Pertanyaan: 'Manakah di antara pernyataan berikut yang BENAR mengenai ciri khas sel tumbuhan? (Pilihlah semua opsi yang sesuai)',
+        'Pilihan A': 'Memiliki dinding sel dari zat selulosa yang kaku',
+        'Pilihan B': 'Tidak memiliki membran inti sel (prokariotik)',
+        'Pilihan C': 'Memiliki kloroplas yang mengandung klorofil untuk fotosintesis',
+        'Pilihan D': 'Memiliki vakuola sentral berukuran besar',
+        'Pilihan E': '',
+        'Kunci Jawaban': 'A, C, D',
+        'Kata Kunci Konsep': 'dinding sel, kloroplas, vakuola sentral, selulosa',
+        'Konsep Materi': 'Karakteristik Sel Tumbuhan vs Sel Hewan',
+        'Skor Maks': 10,
+        Pembahasan: 'Pernyataan A, C, dan D benar. Pernyataan B salah karena sel tumbuhan adalah eukariotik.',
+      },
+      {
+        No: 3,
+        'Bentuk Soal': 'isian_singkat',
+        Pertanyaan: 'Zat hijau daun yang berperan vital menangkap energi foton cahaya matahari dalam reaksi fotosintesis disebut...',
+        'Pilihan A': '',
+        'Pilihan B': '',
+        'Pilihan C': '',
+        'Pilihan D': '',
+        'Pilihan E': '',
+        'Kunci Jawaban': 'Klorofil',
+        'Kata Kunci Konsep': 'klorofil, zat hijau daun, pigmen fotosintesis',
+        'Konsep Materi': 'Fotosintesis Tumbuhan',
+        'Skor Maks': 10,
+        Pembahasan: 'Klorofil adalah pigmen utama penangkap cahaya fotosintesis pada tilakoid kloroplas.',
+      },
+      {
+        No: 4,
+        'Bentuk Soal': 'uraian',
+        Pertanyaan: 'Jelaskan dua tahapan utama dalam proses fotosintesis pada tumbuhan hijau, tempat terjadinya, serta produk yang dihasilkan masing-masing tahapan!',
+        'Pilihan A': '',
+        'Pilihan B': '',
+        'Pilihan C': '',
+        'Pilihan D': '',
+        'Pilihan E': '',
+        'Kunci Jawaban': 'Reaksi terang berlangsung di grana/tilakoid menghasilkan O2, ATP, dan NADPH. Reaksi gelap (siklus Calvin) berlangsung di stroma menghasilkan glukosa (karbohidrat).',
+        'Kata Kunci Konsep': 'reaksi terang, reaksi gelap, siklus Calvin, tilakoid, stroma, ATP, NADPH, glukosa',
+        'Konsep Materi': 'Mekanisme Biokimia Fotosintesis',
+        'Skor Maks': 20,
+        Pembahasan: 'Skor penuh jika mencakup perbandingan reaksi terang (di tilakoid) dan reaksi gelap (di stroma) beserta produknya.',
+      },
+    ];
+
+    const instructions = [
+      {
+        Kolom: 'Bentuk Soal',
+        'Aturan Pengisian': 'Wajib diisi dengan salah satu: pilihan_ganda, pilihan_ganda_kompleks, isian_singkat, atau uraian.',
+        Contoh: 'pilihan_ganda',
+      },
+      {
+        Kolom: 'Pertanyaan',
+        'Aturan Pengisian': 'Teks butir soal lengkap. Hindari format karakter aneh.',
+        Contoh: 'Organel sel yang berfungsi...',
+      },
+      {
+        Kolom: 'Pilihan A - E',
+        'Aturan Pengisian': 'Isi teks pilihan untuk bentuk soal pilihan_ganda dan pilihan_ganda_kompleks. Biarkan kosong untuk isian/uraian.',
+        Contoh: 'Mitokondria',
+      },
+      {
+        Kolom: 'Kunci Jawaban',
+        'Aturan Pengisian': 'Pilihan Ganda: 1 huruf (cth: A). PG Kompleks: huruf dipisah koma (cth: A, C). Isian: kata kunci jawaban. Uraian: ringkasan acuan.',
+        Contoh: 'A / A, C, D / Klorofil',
+      },
+      {
+        Kolom: 'Kata Kunci Konsep',
+        'Aturan Pengisian': 'Pisahkan dengan koma. Digunakan oleh mesin AI untuk pencocokan jawaban isian & penilaian rubrik uraian.',
+        Contoh: 'mitokondria, ATP, respirasi',
+      },
+      {
+        Kolom: 'Skor Maks',
+        'Aturan Pengisian': 'Bobot skor maksimal butir soal (misal: 10 untuk PG, 20 untuk Uraian).',
+        Contoh: '10',
+      },
+      {
+        Kolom: 'Pembahasan',
+        'Aturan Pengisian': 'Penjelasan edukatif yang tampil saat siswa melihat lembar pembahasan ujian.',
+        Contoh: 'Mitokondria merupakan...',
+      },
+    ];
+
+    const wb = XLSX.utils.book_new();
+    const wsQuestions = XLSX.utils.json_to_sheet(sampleQuestions);
+    const wsInstructions = XLSX.utils.json_to_sheet(instructions);
+
+    XLSX.utils.book_append_sheet(wb, wsQuestions, 'Template_Soal');
+    XLSX.utils.book_append_sheet(wb, wsInstructions, 'Petunjuk_Pengisian');
+
+    const filename = format === 'csv' ? 'Template_Soal_EduCBT.csv' : 'Template_Soal_EduCBT.xlsx';
+    XLSX.writeFile(wb, filename, { bookType: format === 'csv' ? 'csv' : 'xlsx' });
+  },
+
+  // Download Student Template (.xlsx or .csv) with sample data and guidance
+  downloadStudentTemplate(format: 'xlsx' | 'csv' = 'xlsx') {
+    const sampleStudents = [
+      {
+        No: 1,
+        NISN: '0081234501',
+        'Nama Lengkap': 'Ahmad Fauzi Rahman',
+        'Jenis Kelamin (L/P)': 'L',
+        Kelas: 'IX-A',
+        'No. WhatsApp Orang Tua': '081234567801',
+        'Email Orang Tua': 'wali.ahmad@gmail.com',
+      },
+      {
+        No: 2,
+        NISN: '0081234502',
+        'Nama Lengkap': 'Annisa Larasati Putri',
+        'Jenis Kelamin (L/P)': 'P',
+        Kelas: 'IX-A',
+        'No. WhatsApp Orang Tua': '081234567802',
+        'Email Orang Tua': 'wali.annisa@gmail.com',
+      },
+      {
+        No: 3,
+        NISN: '0081234503',
+        'Nama Lengkap': 'Budi Santoso Wibowo',
+        'Jenis Kelamin (L/P)': 'L',
+        Kelas: 'IX-B',
+        'No. WhatsApp Orang Tua': '081234567803',
+        'Email Orang Tua': 'wali.budi@gmail.com',
+      },
+      {
+        No: 4,
+        NISN: '0081234504',
+        'Nama Lengkap': 'Citra Kirana Dewi',
+        'Jenis Kelamin (L/P)': 'P',
+        Kelas: 'IX-B',
+        'No. WhatsApp Orang Tua': '081234567804',
+        'Email Orang Tua': 'wali.citra@gmail.com',
+      },
+      {
+        No: 5,
+        NISN: '0081234505',
+        'Nama Lengkap': 'Dimas Bagus Pratama',
+        'Jenis Kelamin (L/P)': 'L',
+        Kelas: 'IX-C',
+        'No. WhatsApp Orang Tua': '081234567805',
+        'Email Orang Tua': 'wali.dimas@gmail.com',
+      },
+    ];
+
+    const instructions = [
+      {
+        Kolom: 'NISN',
+        'Ketentuan & Format': 'Wajib 10 digit unik angka (menjadi ID login siswa saat membuka ujian CBT).',
+        Contoh: '0081234501',
+      },
+      {
+        Kolom: 'Nama Lengkap',
+        'Ketentuan & Format': 'Nama lengkap resmi siswa sesuai data Dapodik / Kartu Keluarga.',
+        Contoh: 'Ahmad Fauzi Rahman',
+      },
+      {
+        Kolom: 'Jenis Kelamin (L/P)',
+        'Ketentuan & Format': 'Isi dengan huruf "L" (Laki-laki) atau "P" (Perempuan).',
+        Contoh: 'L atau P',
+      },
+      {
+        Kolom: 'Kelas',
+        'Ketentuan & Format': 'Rombongan belajar siswa (misal: IX-A, IX-B, VII-1, dsb).',
+        Contoh: 'IX-A',
+      },
+      {
+        Kolom: 'No. WhatsApp Orang Tua',
+        'Ketentuan & Format': 'Nomor WhatsApp aktif orang tua diawali 08 atau 62 (untuk kirim rekap nilai & remidi).',
+        Contoh: '081234567801',
+      },
+      {
+        Kolom: 'Email Orang Tua',
+        'Ketentuan & Format': 'Email orang tua/wali siswa (opsional).',
+        Contoh: 'orangtua@gmail.com',
+      },
+    ];
+
+    const wb = XLSX.utils.book_new();
+    const wsStudents = XLSX.utils.json_to_sheet(sampleStudents);
+    const wsInstructions = XLSX.utils.json_to_sheet(instructions);
+
+    XLSX.utils.book_append_sheet(wb, wsStudents, 'Template_Siswa');
+    XLSX.utils.book_append_sheet(wb, wsInstructions, 'Petunjuk_Pengisian');
+
+    const filename = format === 'csv' ? 'Template_Daftar_Siswa_EduCBT.csv' : 'Template_Daftar_Siswa_EduCBT.xlsx';
+    XLSX.writeFile(wb, filename, { bookType: format === 'csv' ? 'csv' : 'xlsx' });
+  },
+
+  // Parse Excel or CSV file for students
   async parseStudentsFromExcel(file: File): Promise<Student[]> {
     const buffer = await file.arrayBuffer();
     const wb = XLSX.read(buffer, { type: 'array' });
-    const firstSheetName = wb.SheetNames[0];
-    const ws = wb.Sheets[firstSheetName];
+    // Find matching sheet name or fallback to first sheet
+    let targetSheetName = wb.SheetNames[0];
+    const candidate = wb.SheetNames.find(
+      (name) => !name.toLowerCase().includes('petunjuk') && (name.toLowerCase().includes('siswa') || name.toLowerCase().includes('student'))
+    );
+    if (candidate) targetSheetName = candidate;
+
+    const ws = wb.Sheets[targetSheetName];
     const json: any[] = XLSX.utils.sheet_to_json(ws);
 
-    return json.map((row, index) => {
-      // Flexible column name matching
-      const nisn = String(row['NISN'] || row['nisn'] || row['Nomor Induk'] || `0089100${index + 1}`).trim();
-      const name = String(row['Nama Lengkap'] || row['Nama Siswa'] || row['Nama'] || row['name'] || `Siswa Baru ${index + 1}`).trim();
-      const genderRaw = String(row['Jenis Kelamin'] || row['Jenis Kelamin (L/P)'] || row['JK'] || 'L').trim().toUpperCase();
-      const gender: 'L' | 'P' = genderRaw.startsWith('P') ? 'P' : 'L';
-      const classRoom = String(row['Kelas'] || row['Rombel'] || 'IX-A').trim();
-      const parentPhone = String(row['No. WhatsApp Orang Tua'] || row['No WA'] || row['Telepon'] || '081234567890').trim();
-      const parentEmail = String(row['Email Orang Tua'] || row['Email'] || '').trim();
+    return json
+      .filter((row) => {
+        // Must have either NISN or Name to be considered a valid student row
+        const hasNisn = row['NISN'] || row['nisn'] || row['Nomor Induk'];
+        const hasName = row['Nama Lengkap'] || row['Nama Siswa'] || row['Nama'] || row['name'];
+        return hasNisn || hasName;
+      })
+      .map((row, index) => {
+        const nisn = String(row['NISN'] || row['nisn'] || row['Nomor Induk'] || `0089100${index + 1}`).trim();
+        const name = String(row['Nama Lengkap'] || row['Nama Siswa'] || row['Nama'] || row['name'] || `Siswa Baru ${index + 1}`).trim();
+        const genderRaw = String(row['Jenis Kelamin'] || row['Jenis Kelamin (L/P)'] || row['JK'] || 'L').trim().toUpperCase();
+        const gender: 'L' | 'P' = genderRaw.startsWith('P') ? 'P' : 'L';
+        const classRoom = String(row['Kelas'] || row['Rombel'] || 'IX-A').trim();
+        const parentPhone = String(row['No. WhatsApp Orang Tua'] || row['No WA'] || row['Telepon'] || row['WhatsApp'] || '081234567890').trim();
+        const parentEmail = String(row['Email Orang Tua'] || row['Email'] || '').trim();
 
-      return {
-        id: `std-imp-${Date.now()}-${index}`,
-        nisn,
-        name,
-        gender,
-        classRoom,
-        parentPhone,
-        parentEmail,
-      };
-    });
+        return {
+          id: `std-imp-${Date.now()}-${index}`,
+          nisn,
+          name,
+          gender,
+          classRoom,
+          parentPhone,
+          parentEmail,
+        };
+      });
   },
 
-  // Parse questions from Excel file
+  // Parse questions from Excel or CSV file
   async parseQuestionsFromExcel(file: File): Promise<any[]> {
     const buffer = await file.arrayBuffer();
     const wb = XLSX.read(buffer, { type: 'array' });
-    const firstSheetName = wb.SheetNames[0];
-    const ws = wb.Sheets[firstSheetName];
+    // Find matching sheet name or fallback to first sheet
+    let targetSheetName = wb.SheetNames[0];
+    const candidate = wb.SheetNames.find(
+      (name) => !name.toLowerCase().includes('petunjuk') && (name.toLowerCase().includes('soal') || name.toLowerCase().includes('bank') || name.toLowerCase().includes('question'))
+    );
+    if (candidate) targetSheetName = candidate;
+
+    const ws = wb.Sheets[targetSheetName];
     const json: any[] = XLSX.utils.sheet_to_json(ws);
 
-    return json.map((row, index) => {
-      const typeStr = String(row['Bentuk Soal'] || row['Tipe Soal'] || 'pilihan_ganda').toLowerCase();
-      let type = 'pilihan_ganda';
-      if (typeStr.includes('kompleks')) type = 'pilihan_ganda_kompleks';
-      else if (typeStr.includes('singkat') || typeStr.includes('pendek')) type = 'isian_singkat';
-      else if (typeStr.includes('uraian') || typeStr.includes('esai') || typeStr.includes('essay')) type = 'uraian';
+    return json
+      .filter((row) => {
+        // Must have question text
+        const qText = row['Pertanyaan'] || row['Soal'] || row['question'] || row['Pertanyaan Soal'];
+        return qText && String(qText).trim().length > 0;
+      })
+      .map((row, index) => {
+        const typeStr = String(row['Bentuk Soal'] || row['Tipe Soal'] || row['Tipe'] || 'pilihan_ganda').toLowerCase();
+        let type = 'pilihan_ganda';
+        if (typeStr.includes('kompleks')) type = 'pilihan_ganda_kompleks';
+        else if (typeStr.includes('singkat') || typeStr.includes('pendek') || typeStr.includes('isian')) type = 'isian_singkat';
+        else if (typeStr.includes('uraian') || typeStr.includes('esai') || typeStr.includes('essay')) type = 'uraian';
 
-      const options: string[] = [];
-      ['Pilihan A', 'Pilihan B', 'Pilihan C', 'Pilihan D', 'Pilihan E', 'A', 'B', 'C', 'D', 'E'].forEach((key) => {
-        if (row[key]) {
-          options.push(`${key.replace('Pilihan ', '')}. ${row[key]}`);
+        const options: string[] = [];
+        ['Pilihan A', 'Pilihan B', 'Pilihan C', 'Pilihan D', 'Pilihan E', 'A', 'B', 'C', 'D', 'E'].forEach((key) => {
+          if (row[key] !== undefined && row[key] !== null && String(row[key]).trim() !== '') {
+            const label = key.replace('Pilihan ', '').trim();
+            const val = String(row[key]).trim();
+            // Avoid duplicate prefix like "A. A. text"
+            if (val.startsWith(`${label}.`)) {
+              options.push(val);
+            } else {
+              options.push(`${label}. ${val}`);
+            }
+          }
+        });
+
+        const correctAnswerRaw = String(row['Kunci Jawaban'] || row['Kunci'] || row['Jawaban'] || 'A').trim();
+        let correctAnswer: any = correctAnswerRaw;
+        if (type === 'pilihan_ganda_kompleks') {
+          correctAnswer = correctAnswerRaw
+            .split(/[,;\s]+/)
+            .map((k) => k.trim().toUpperCase())
+            .filter(Boolean);
+          if (correctAnswer.length === 0) correctAnswer = ['A'];
         }
+
+        const keywordsRaw = String(row['Kata Kunci Konsep'] || row['Kata Kunci'] || '').trim();
+        const keywords = keywordsRaw ? keywordsRaw.split(/[,;]+/).map((k) => k.trim()).filter(Boolean) : [];
+
+        return {
+          id: `q-imp-${Date.now()}-${index}`,
+          type,
+          question: String(row['Pertanyaan'] || row['Soal'] || row['question'] || `Soal ${index + 1}`).trim(),
+          options,
+          correctAnswer,
+          keywords,
+          concept: String(row['Konsep Materi'] || row['Materi'] || '').trim(),
+          maxScore: Number(row['Skor Maks'] || row['Skor'] || (type === 'uraian' ? 20 : 10)),
+          explanation: String(row['Pembahasan'] || row['Penjelasan'] || '').trim(),
+        };
       });
-
-      const correctAnswerRaw = String(row['Kunci Jawaban'] || row['Kunci'] || 'A').trim();
-      let correctAnswer: any = correctAnswerRaw;
-      if (type === 'pilihan_ganda_kompleks') {
-        correctAnswer = correctAnswerRaw.split(/[,;\s]+/).map((k) => k.trim().toUpperCase()).filter(Boolean);
-      }
-
-      const keywordsRaw = String(row['Kata Kunci Konsep'] || row['Kata Kunci'] || '').trim();
-      const keywords = keywordsRaw ? keywordsRaw.split(/[,;]+/).map((k) => k.trim()) : [];
-
-      return {
-        id: `q-imp-${Date.now()}-${index}`,
-        type,
-        question: String(row['Pertanyaan'] || row['Soal'] || `Soal ${index + 1}`).trim(),
-        options,
-        correctAnswer,
-        keywords,
-        concept: String(row['Konsep Materi'] || '').trim(),
-        maxScore: Number(row['Skor Maks'] || (type === 'uraian' ? 20 : 10)),
-        explanation: String(row['Pembahasan'] || '').trim(),
-      };
-    });
   },
 
   // Generate readable .txt formatted exam question paper

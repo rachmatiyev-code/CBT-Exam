@@ -28,9 +28,11 @@ import {
   FolderArchive,
   ArrowRight,
 } from 'lucide-react';
-import { Exam, Question, QuestionType, ExamPackage } from '../types';
+import { Exam, Question, QuestionType, ExamPackage, QuestionDraft } from '../types';
 import { excelService } from '../services/gasSync';
 import { apiService } from '../services/api';
+import { QuestionDraftModal } from './QuestionDraftModal';
+import { QuestionTemplateModal } from './QuestionTemplateModal';
 
 interface QuestionBankTabProps {
   exam: Exam;
@@ -65,8 +67,30 @@ export const QuestionBankTab: React.FC<QuestionBankTabProps> = ({
   // History & Save Package Modals
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
   const [isSaveModalOpen, setIsSaveModalOpen] = useState(false);
+  const [isDraftModalOpen, setIsDraftModalOpen] = useState(false);
+  const [isTemplateModalOpen, setIsTemplateModalOpen] = useState(false);
   const [copiedNotification, setCopiedNotification] = useState<string | null>(null);
   const [historySearch, setHistorySearch] = useState('');
+
+  const handleLoadDraftQuestion = (draft: QuestionDraft) => {
+    onUpdateExam({
+      ...exam,
+      subject: draft.subject || exam.subject,
+      grade: draft.grade || exam.grade,
+      semester: draft.semester || exam.semester,
+      questions: draft.questions,
+    });
+    onTriggerBackup();
+  };
+
+  const handleImportTemplateQuestions = (imported: Question[], mode: 'append' | 'replace') => {
+    const updated = mode === 'replace' ? imported : [...exam.questions, ...imported];
+    onUpdateExam({
+      ...exam,
+      questions: updated,
+    });
+    onTriggerBackup();
+  };
   const [saveFormData, setSaveFormData] = useState({
     code: exam.code || 'SOAL-01',
     token: exam.token || 'EXAM26',
@@ -335,6 +359,28 @@ export const QuestionBankTab: React.FC<QuestionBankTabProps> = ({
 
         {/* Action Buttons */}
         <div className="flex flex-wrap items-center gap-2">
+          {/* Draft Soal Button */}
+          <button
+            id="btn-open-question-drafts"
+            onClick={() => setIsDraftModalOpen(true)}
+            className="px-3.5 py-2 text-xs font-semibold rounded-xl bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 flex items-center gap-1.5 transition shadow-2xs"
+            title="Kelola & Simpan Draft Soal"
+          >
+            <BookmarkPlus className="w-4 h-4 text-blue-600" />
+            <span>Draft Soal</span>
+          </button>
+
+          {/* Template Soal (Unduh & Unggah) Button */}
+          <button
+            id="btn-open-question-templates"
+            onClick={() => setIsTemplateModalOpen(true)}
+            className="px-3.5 py-2 text-xs font-semibold rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 flex items-center gap-1.5 transition shadow-2xs"
+            title="Unduh & Unggah Template Format Soal (Excel / CSV)"
+          >
+            <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+            <span>Template Soal</span>
+          </button>
+
           {/* Riwayat & Bank Paket Soal Button */}
           <button
             id="btn-open-package-history"
@@ -667,6 +713,30 @@ export const QuestionBankTab: React.FC<QuestionBankTabProps> = ({
           onClose={() => setIsSaveModalOpen(false)}
         />
       )}
+
+      {/* Question Draft Modal */}
+      <QuestionDraftModal
+        isOpen={isDraftModalOpen}
+        onClose={() => setIsDraftModalOpen(false)}
+        exam={exam}
+        onLoadDraft={handleLoadDraftQuestion}
+        onSaveNotification={(msg) => {
+          setCopiedNotification(msg);
+          setTimeout(() => setCopiedNotification(null), 3000);
+        }}
+      />
+
+      {/* Question Template Modal */}
+      <QuestionTemplateModal
+        isOpen={isTemplateModalOpen}
+        onClose={() => setIsTemplateModalOpen(false)}
+        exam={exam}
+        onImportQuestions={handleImportTemplateQuestions}
+        onNotification={(msg) => {
+          setCopiedNotification(msg);
+          setTimeout(() => setCopiedNotification(null), 3000);
+        }}
+      />
     </div>
   );
 };

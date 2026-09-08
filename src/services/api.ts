@@ -1,3 +1,5 @@
+import { QuestionDraft, StudentDraft } from '../types';
+
 export interface GenerateQuestionsParams {
   subject: string;
   grade: string;
@@ -350,5 +352,169 @@ export const apiService = {
     } catch (e) {
       return { success: false };
     }
+  },
+
+  // =========================================================================
+  // DRAFT PERSISTENCE (DUAL STORAGE: LOCALSTORAGE + SERVER-SIDE)
+  // =========================================================================
+
+  // 1. Question Drafts
+  async getQuestionDrafts(): Promise<QuestionDraft[]> {
+    // 1. First get from local cache
+    let localDrafts: QuestionDraft[] = [];
+    try {
+      const raw = localStorage.getItem('educbt_question_drafts');
+      if (raw) localDrafts = JSON.parse(raw);
+    } catch {}
+
+    // 2. Fetch server drafts and merge
+    try {
+      const res = await fetch('/api/cbt/drafts/questions');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && Array.isArray(data.drafts)) {
+          const map = new Map<string, QuestionDraft>();
+          localDrafts.forEach((d) => map.set(d.id, d));
+          data.drafts.forEach((d: QuestionDraft) => map.set(d.id, d));
+          const merged = Array.from(map.values()).sort(
+            (a, b) => new Date(b.savedAt).getTime() - new Date(a.savedAt).getTime()
+          );
+          localStorage.setItem('educbt_question_drafts', JSON.stringify(merged));
+          return merged;
+        }
+      }
+    } catch {}
+
+    return localDrafts;
+  },
+
+  async saveQuestionDraft(draft: QuestionDraft): Promise<{ success: boolean; drafts: QuestionDraft[] }> {
+    // Save to local cache
+    let drafts: QuestionDraft[] = [];
+    try {
+      const raw = localStorage.getItem('educbt_question_drafts');
+      if (raw) drafts = JSON.parse(raw);
+    } catch {}
+
+    const index = drafts.findIndex((d) => d.id === draft.id);
+    const updatedDraft = { ...draft, savedAt: new Date().toISOString() };
+    if (index >= 0) {
+      drafts[index] = updatedDraft;
+    } else {
+      drafts.unshift(updatedDraft);
+    }
+    localStorage.setItem('educbt_question_drafts', JSON.stringify(drafts));
+
+    // Save to server
+    try {
+      await fetch('/api/cbt/drafts/questions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ draft: updatedDraft }),
+      });
+    } catch (err) {
+      console.warn('Gagal sinkron draft soal ke server, tersimpan lokal:', err);
+    }
+
+    return { success: true, drafts };
+  },
+
+  async deleteQuestionDraft(id: string): Promise<{ success: boolean; drafts: QuestionDraft[] }> {
+    let drafts: QuestionDraft[] = [];
+    try {
+      const raw = localStorage.getItem('educbt_question_drafts');
+      if (raw) drafts = JSON.parse(raw);
+    } catch {}
+
+    const filtered = drafts.filter((d) => d.id !== id);
+    localStorage.setItem('educbt_question_drafts', JSON.stringify(filtered));
+
+    try {
+      await fetch(`/api/cbt/drafts/questions/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      });
+    } catch (err) {
+      console.warn('Gagal hapus draft soal di server:', err);
+    }
+
+    return { success: true, drafts: filtered };
+  },
+
+  // 2. Student Drafts
+  async getStudentDrafts(): Promise<StudentDraft[]> {
+    let localDrafts: StudentDraft[] = [];
+    try {
+      const raw = localStorage.getItem('educbt_student_drafts');
+      if (raw) localDrafts = JSON.parse(raw);
+    } catch {}
+
+    try {
+      const res = await fetch('/api/cbt/drafts/students');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && Array.isArray(data.drafts)) {
+          const map = new Map<string, StudentDraft>();
+          localDrafts.forEach((d) => map.set(d.id, d));
+          data.drafts.forEach((d: StudentDraft) => map.set(d.id, d));
+          const merged = Array.from(map.values()).sort(
+            (a, b) => new Date(b.savedAt).getTime() - new Date(a.savedAt).getTime()
+          );
+          localStorage.setItem('educbt_student_drafts', JSON.stringify(merged));
+          return merged;
+        }
+      }
+    } catch {}
+
+    return localDrafts;
+  },
+
+  async saveStudentDraft(draft: StudentDraft): Promise<{ success: boolean; drafts: StudentDraft[] }> {
+    let drafts: StudentDraft[] = [];
+    try {
+      const raw = localStorage.getItem('educbt_student_drafts');
+      if (raw) drafts = JSON.parse(raw);
+    } catch {}
+
+    const index = drafts.findIndex((d) => d.id === draft.id);
+    const updatedDraft = { ...draft, savedAt: new Date().toISOString() };
+    if (index >= 0) {
+      drafts[index] = updatedDraft;
+    } else {
+      drafts.unshift(updatedDraft);
+    }
+    localStorage.setItem('educbt_student_drafts', JSON.stringify(drafts));
+
+    try {
+      await fetch('/api/cbt/drafts/students', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ draft: updatedDraft }),
+      });
+    } catch (err) {
+      console.warn('Gagal sinkron draft siswa ke server, tersimpan lokal:', err);
+    }
+
+    return { success: true, drafts };
+  },
+
+  async deleteStudentDraft(id: string): Promise<{ success: boolean; drafts: StudentDraft[] }> {
+    let drafts: StudentDraft[] = [];
+    try {
+      const raw = localStorage.getItem('educbt_student_drafts');
+      if (raw) drafts = JSON.parse(raw);
+    } catch {}
+
+    const filtered = drafts.filter((d) => d.id !== id);
+    localStorage.setItem('educbt_student_drafts', JSON.stringify(filtered));
+
+    try {
+      await fetch(`/api/cbt/drafts/students/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      });
+    } catch (err) {
+      console.warn('Gagal hapus draft siswa di server:', err);
+    }
+
+    return { success: true, drafts: filtered };
   },
 };

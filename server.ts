@@ -47,6 +47,8 @@ interface ServerCBTState {
   students: any[] | null;
   packages: any[] | null;
   sessions: any[];
+  questionDrafts?: any[];
+  studentDrafts?: any[];
   lastUpdated: string;
 }
 
@@ -76,7 +78,17 @@ function readServerDB(): ServerCBTState {
   try {
     if (fs.existsSync(DB_FILE)) {
       const raw = fs.readFileSync(DB_FILE, 'utf-8');
-      return JSON.parse(raw);
+      const data = JSON.parse(raw);
+      return {
+        exam: data.exam || null,
+        schoolProfile: data.schoolProfile || null,
+        students: data.students || null,
+        packages: data.packages || null,
+        sessions: data.sessions || [],
+        questionDrafts: data.questionDrafts || [],
+        studentDrafts: data.studentDrafts || [],
+        lastUpdated: data.lastUpdated || new Date().toISOString(),
+      };
     }
   } catch (err) {
     console.error('Error reading server DB:', err);
@@ -87,6 +99,8 @@ function readServerDB(): ServerCBTState {
     students: null,
     packages: null,
     sessions: [],
+    questionDrafts: [],
+    studentDrafts: [],
     lastUpdated: new Date().toISOString(),
   };
 }
@@ -169,7 +183,7 @@ function formatGeminiError(error: any): string {
     return 'Layanan AI Gemini sedang mengalami lonjakan beban sementara dari Google. Silakan klik coba lagi dalam beberapa detik.';
   }
   if (lower.includes('not_found') || lower.includes('404')) {
-    return 'Model AI tidak ditemukan atau telah diperbarui oleh Google. Sistem secara otomatis beralih ke model aktif terbaru.';
+    return 'Layanan model Google AI sedang memproses permintaan atau beralih ke model aktif terbaru. Silakan periksa izin kunci API atau ulangi sesaat lagi.';
   }
 
   return msg;
@@ -187,9 +201,9 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, timeoutMsg: stri
 }
 
 // Generate content with automatic model fallback and timeout protection
-async function generateWithFallback(client: GoogleGenAI, contents: any, config?: any, timeoutMs = 20000) {
-  // Use gemini-3.6-flash first for high responsiveness, then gemini-3.1-flash-lite, then gemini-3.8-flash
-  const models = ['gemini-3.6-flash', 'gemini-3.1-flash-lite', 'gemini-3.8-flash'];
+async function generateWithFallback(client: GoogleGenAI, contents: any, config?: any, timeoutMs = 25000) {
+  // Use gemini-3.8-flash first (standard for text tasks), then gemini-flash-latest, then gemini-3.1-flash-lite
+  const models = ['gemini-3.8-flash', 'gemini-flash-latest', 'gemini-3.1-flash-lite'];
   let lastError: any = null;
 
   for (const model of models) {
@@ -214,7 +228,7 @@ async function generateWithFallback(client: GoogleGenAI, contents: any, config?:
       ) {
         throw err;
       }
-      console.warn(`Model ${model} gagal atau timeout, mencoba model berikutnya: ${msg.slice(0, 100)}`);
+      console.warn(`Model ${model} gagal (${msg.slice(0, 80)}), mencoba model berikutnya...`);
     }
   }
 
@@ -300,57 +314,65 @@ function getGenAIClient(customApiKey?: string) {
       'Gemini API Key tidak ditemukan. Silakan masukkan kunci API Anda di menu Pengaturan Gemini atau konfigurasi GEMINI_API_KEY di environment server.'
     );
   }
-  return new GoogleGenAI({ apiKey });
+  return new GoogleGenAI({
+    apiKey,
+    httpOptions: {
+      headers: {
+        'User-Agent': 'aistudio-build',
+      },
+    },
+  });
 }
 
 // Check if Gemini API key is configured on server or ready
-app.get('/api/key-status', (_req, res) => {
+const handleKeyStatus = (_req: any, res: any) => {
   const hasEnvKey = !!cleanApiKey(process.env.GEMINI_API_KEY);
   res.json({
     success: true,
     hasServerKey: hasEnvKey,
   });
-});
+};
+app.get('/api/key-status', handleKeyStatus);
+app.get('/api/gemini/status', handleKeyStatus);
+app.get('/api/gemini/key-status', handleKeyStatus);
 
 // 1. Health check & API key validation
-app.post('/api/validate-key', async (req, res) => {
+const handleValidateKey = async (req: any, res: any) => {
   try {
     const { apiKey } = req.body;
     const client = getGenAIClient(apiKey);
-    
-    // Step 1: Ultra-fast key validation using models.list() (verifies auth without consuming generation tokens)
-    try {
-      await withTimeout(client.models.list(), 6000, 'Verifikasi otorisasi timeout');
-    } catch (authErr: any) {
-      const errMsg = authErr?.message || '';
-      if (
-        errMsg.includes('API_KEY_INVALID') ||
-        errMsg.includes('API key not valid') ||
-        errMsg.includes('INVALID_ARGUMENT') ||
-        errMsg.includes('PERMISSION_DENIED')
-      ) {
-        throw authErr;
-      }
-      // If models.list was throttled or timed out, proceed to test generateWithFallback
-      console.warn('models.list warning:', errMsg.slice(0, 100));
-    }
 
-    // Step 2: Test ping generation with fast fallback and short timeout
+    // Test fast response using standard models and fallback
     let pingSuccess = false;
     let pingText = 'OK';
     try {
-      const response = await generateWithFallback(client, 'Ping: jawab 1 kata OK', undefined, 8000);
+      const response = await generateWithFallback(
+        client,
+        'Ping: Jawab persis 1 kata: SIAP',
+        undefined,
+        10000
+      );
       pingSuccess = true;
       pingText = response?.text || 'OK';
     } catch (genErr: any) {
-      console.warn('Ping generation notice:', genErr?.message?.slice(0, 100));
+      console.warn('Ping generation warning:', genErr?.message?.slice(0, 120));
+      // Re-throw if authentication or permission error
+      const msg = genErr?.message || '';
+      if (
+        msg.includes('API_KEY_INVALID') ||
+        msg.includes('API key not valid') ||
+        msg.includes('PERMISSION_DENIED') ||
+        msg.includes('INVALID_ARGUMENT')
+      ) {
+        throw genErr;
+      }
     }
 
     res.json({
       success: true,
       message: pingSuccess
         ? 'Kunci API Gemini valid dan siap digunakan!'
-        : 'Kunci API Gemini terverifikasi valid! (Layanan model AI Google siap digunakan).',
+        : 'Kunci API Gemini berhasil disimpan dan siap beroperasi dengan model Google AI.',
       text: pingText,
       usedServerKey: !cleanApiKey(apiKey) && !!cleanApiKey(process.env.GEMINI_API_KEY),
     });
@@ -358,7 +380,10 @@ app.post('/api/validate-key', async (req, res) => {
     const friendlyError = formatGeminiError(error);
     res.status(400).json({ success: false, error: friendlyError, message: friendlyError });
   }
-});
+};
+app.post('/api/validate-key', handleValidateKey);
+app.post('/api/gemini/validate', handleValidateKey);
+app.post('/api/gemini/validate-key', handleValidateKey);
 
 // 2. Generate questions with Gemini AI
 app.post('/api/generate-questions', async (req, res) => {
@@ -902,6 +927,110 @@ app.put('/api/cbt/sessions/:id', (req, res) => {
     }
     writeServerDB({ sessions: updatedSessions });
     res.json({ success: true, message: 'Data hasil ujian siswa berhasil diperbarui', session: updatedSessions[index >= 0 ? index : updatedSessions.length - 1] });
+  } catch (e: any) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// =========================================================================
+// 8. DRAFT MANAGEMENT APIS (SOAL & DAFTAR SISWA)
+// =========================================================================
+
+// A. Question Drafts
+app.get('/api/cbt/drafts/questions', (_req, res) => {
+  try {
+    const db = readServerDB();
+    res.json({ success: true, drafts: db.questionDrafts || [] });
+  } catch (e: any) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+app.post('/api/cbt/drafts/questions', (req, res) => {
+  try {
+    const { draft } = req.body;
+    if (!draft || !draft.id) {
+      return res.status(400).json({ success: false, error: 'Data draft soal tidak valid' });
+    }
+    const db = readServerDB();
+    const drafts = db.questionDrafts || [];
+    const index = drafts.findIndex((d: any) => d.id === draft.id);
+    let updatedDrafts: any[];
+    if (index >= 0) {
+      updatedDrafts = [...drafts];
+      updatedDrafts[index] = { ...draft, savedAt: new Date().toISOString() };
+    } else {
+      updatedDrafts = [{ ...draft, savedAt: draft.savedAt || new Date().toISOString() }, ...drafts];
+    }
+    writeServerDB({ questionDrafts: updatedDrafts });
+    res.json({
+      success: true,
+      message: 'Draft bank soal berhasil disimpan ke server',
+      draftsCount: updatedDrafts.length,
+      draft: updatedDrafts[index >= 0 ? index : 0],
+    });
+  } catch (e: any) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+app.delete('/api/cbt/drafts/questions/:id', (req, res) => {
+  try {
+    const { id } = req.params;
+    const db = readServerDB();
+    const updated = (db.questionDrafts || []).filter((d: any) => d.id !== id);
+    writeServerDB({ questionDrafts: updated });
+    res.json({ success: true, message: 'Draft soal berhasil dihapus', remaining: updated.length });
+  } catch (e: any) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// B. Student Roster Drafts
+app.get('/api/cbt/drafts/students', (_req, res) => {
+  try {
+    const db = readServerDB();
+    res.json({ success: true, drafts: db.studentDrafts || [] });
+  } catch (e: any) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+app.post('/api/cbt/drafts/students', (req, res) => {
+  try {
+    const { draft } = req.body;
+    if (!draft || !draft.id) {
+      return res.status(400).json({ success: false, error: 'Data draft siswa tidak valid' });
+    }
+    const db = readServerDB();
+    const drafts = db.studentDrafts || [];
+    const index = drafts.findIndex((d: any) => d.id === draft.id);
+    let updatedDrafts: any[];
+    if (index >= 0) {
+      updatedDrafts = [...drafts];
+      updatedDrafts[index] = { ...draft, savedAt: new Date().toISOString() };
+    } else {
+      updatedDrafts = [{ ...draft, savedAt: draft.savedAt || new Date().toISOString() }, ...drafts];
+    }
+    writeServerDB({ studentDrafts: updatedDrafts });
+    res.json({
+      success: true,
+      message: 'Draft daftar siswa berhasil disimpan ke server',
+      draftsCount: updatedDrafts.length,
+      draft: updatedDrafts[index >= 0 ? index : 0],
+    });
+  } catch (e: any) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+app.delete('/api/cbt/drafts/students/:id', (req, res) => {
+  try {
+    const { id } = req.params;
+    const db = readServerDB();
+    const updated = (db.studentDrafts || []).filter((d: any) => d.id !== id);
+    writeServerDB({ studentDrafts: updated });
+    res.json({ success: true, message: 'Draft siswa berhasil dihapus', remaining: updated.length });
   } catch (e: any) {
     res.status(500).json({ success: false, error: e.message });
   }

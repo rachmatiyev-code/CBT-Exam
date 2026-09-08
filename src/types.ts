@@ -193,3 +193,26 @@ export interface AppsScriptSettings {
   autoBackupEnabled: boolean;
   lastSyncTime: string;
 }
+
+export interface QuestionDraft {
+  id: string;
+  title: string;
+  subject: string;
+  grade: string;
+  semester: string;
+  questionsCount: number;
+  questions: Question[];
+  savedAt: string;
+  note?: string;
+}
+
+export interface StudentDraft {
+  id: string;
+  title: string;
+  studentsCount: number;
+  classesCount: number;
+  classes: string[];
+  students: Student[];
+  savedAt: string;
+  note?: string;
+}
