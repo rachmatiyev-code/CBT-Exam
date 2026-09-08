@@ -682,6 +682,17 @@ export const StudentExamView: React.FC<StudentExamViewProps> = ({
               {currentQuestion.question}
             </div>
 
+            {/* Question Image if present */}
+            {currentQuestion.image && (
+              <div className="my-3 max-w-lg">
+                <img
+                  src={currentQuestion.image}
+                  alt="Gambar Ilustrasi Soal"
+                  className="max-h-64 max-w-full rounded-xl border border-slate-200 bg-white p-1 object-contain shadow-xs"
+                />
+              </div>
+            )}
+
             {/* Question Interaction Type 1: Pilihan Ganda */}
             {currentQuestion.type === 'pilihan_ganda' && (
               <div className="space-y-2.5 pt-2">

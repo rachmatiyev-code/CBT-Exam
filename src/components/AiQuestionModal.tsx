@@ -109,7 +109,15 @@ export const AiQuestionModal: React.FC<AiQuestionModalProps> = ({
       setGeneratedPreview(formatted);
     } catch (err: any) {
       console.error(err);
-      setError(err.message || 'Gagal menghasilkan soal dengan AI. Pastikan Kunci API Gemini valid.');
+      let msg = err?.message || '';
+      if (
+        msg.toLowerCase().includes('unexpected token') ||
+        msg.toLowerCase().includes('the page') ||
+        msg.toLowerCase().includes('is not valid json')
+      ) {
+        msg = 'Layanan AI Gemini sedang mengalami kendala respon sementara. Silakan periksa kembali Kunci API Anda atau coba sesaat lagi.';
+      }
+      setError(msg || 'Gagal menghasilkan soal dengan AI. Pastikan Kunci API Gemini valid.');
     } finally {
       setLoading(false);
     }

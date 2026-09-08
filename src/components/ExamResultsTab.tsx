@@ -19,6 +19,15 @@ import {
   Target,
   Quote,
   ChevronRight,
+  Edit3,
+  Trash2,
+  RotateCcw,
+  CheckSquare,
+  Square,
+  X,
+  Save,
+  Calculator,
+  SlidersHorizontal,
 } from 'lucide-react';
 import { Exam, SchoolProfile, Student, StudentExamSession } from '../types';
 import { apiService } from '../services/api';
@@ -30,6 +39,8 @@ interface ExamResultsTabProps {
   students: Student[];
   sessions: StudentExamSession[];
   onUpdateSession: (updated: StudentExamSession) => void;
+  onDeleteSession?: (sessionId: string) => void;
+  onResetSessions?: (sessionIds: string[]) => void;
   onOpenPrintModal: (type: 'individual' | 'classical', session?: StudentExamSession) => void;
 }
 
@@ -39,12 +50,19 @@ export const ExamResultsTab: React.FC<ExamResultsTabProps> = ({
   students,
   sessions,
   onUpdateSession,
+  onDeleteSession,
+  onResetSessions,
   onOpenPrintModal,
 }) => {
   const [selectedSession, setSelectedSession] = useState<StudentExamSession | null>(
     sessions.find((s) => s.status === 'selesai') || sessions[0] || null
   );
   const [generatingAi, setGeneratingAi] = useState(false);
+  const [selectedSessionIds, setSelectedSessionIds] = useState<string[]>([]);
+  const [editingSession, setEditingSession] = useState<StudentExamSession | null>(null);
+  const [editScore, setEditScore] = useState<number>(0);
+  const [editPassed, setEditPassed] = useState<boolean>(true);
+  const [editNotes, setEditNotes] = useState<string>('');
 
   const completedSessions = sessions.filter((s) => s.status === 'selesai');
 
@@ -62,11 +80,111 @@ export const ExamResultsTab: React.FC<ExamResultsTabProps> = ({
   const passedCount = rankedSessions.filter((s) => s.passedKKM).length;
   const passingRate = totalCompleted > 0 ? Math.round((passedCount / totalCompleted) * 100) : 0;
 
+  // Toggle single selection
+  const handleToggleSelect = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setSelectedSessionIds((prev) =>
+      prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]
+    );
+  };
+
+  // Toggle select all
+  const handleToggleSelectAll = () => {
+    if (selectedSessionIds.length === rankedSessions.length) {
+      setSelectedSessionIds([]);
+    } else {
+      setSelectedSessionIds(rankedSessions.map((s) => s.id));
+    }
+  };
+
+  // Reset exam session (allows student to retake)
+  const handleResetSessions = async (ids: string[]) => {
+    if (ids.length === 0) return;
+    const confirmMessage =
+      ids.length === 1
+        ? 'Apakah Anda yakin ingin me-reset ujian siswa ini? Hasil ujian akan dihapus agar siswa dapat login dan mengerjakan ulang dari awal.'
+        : `Apakah Anda yakin ingin me-reset ${ids.length} hasil ujian siswa terpilih agar mereka dapat mengerjakan ulang?`;
+
+    if (!window.confirm(confirmMessage)) return;
+
+    try {
+      if (onResetSessions) {
+        onResetSessions(ids);
+      } else {
+        await apiService.batchDeleteSessionsFromServer(ids);
+        ids.forEach((id) => onDeleteSession?.(id));
+      }
+      setSelectedSessionIds([]);
+      if (selectedSession && ids.includes(selectedSession.id)) {
+        const remaining = rankedSessions.filter((s) => !ids.includes(s.id));
+        setSelectedSession(remaining[0] || null);
+      }
+      alert('Berhasil di-reset! Siswa sekarang dapat mengerjakan kembali ujian.');
+    } catch (err: any) {
+      alert('Gagal me-reset: ' + (err?.message || 'Terjadi kesalahan'));
+    }
+  };
+
+  // Batch delete
+  const handleDeleteSessions = async (ids: string[]) => {
+    if (ids.length === 0) return;
+    const confirmMessage =
+      ids.length === 1
+        ? 'Hapus hasil ujian siswa ini secara permanen?'
+        : `Hapus permanen ${ids.length} hasil ujian siswa terpilih?`;
+
+    if (!window.confirm(confirmMessage)) return;
+
+    try {
+      await apiService.batchDeleteSessionsFromServer(ids);
+      ids.forEach((id) => onDeleteSession?.(id));
+      setSelectedSessionIds([]);
+      if (selectedSession && ids.includes(selectedSession.id)) {
+        const remaining = rankedSessions.filter((s) => !ids.includes(s.id));
+        setSelectedSession(remaining[0] || null);
+      }
+    } catch (err: any) {
+      alert('Gagal menghapus: ' + (err?.message || 'Terjadi kesalahan'));
+    }
+  };
+
+  // Open Edit Modal
+  const handleOpenEditModal = (session: StudentExamSession, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setEditingSession(session);
+    setEditScore(Math.round(session.percentage));
+    setEditPassed(session.passedKKM);
+    setEditNotes(session.remedialPlan?.summary || '');
+  };
+
+  // Save Edit
+  const handleSaveEdit = async () => {
+    if (!editingSession) return;
+    const newPercentage = Math.min(100, Math.max(0, Number(editScore)));
+    const updated: StudentExamSession = {
+      ...editingSession,
+      percentage: newPercentage,
+      passedKKM: editPassed,
+      totalScore: Math.round((newPercentage / 100) * editingSession.maxTotalScore),
+    };
+
+    try {
+      await apiService.updateSessionOnServer(updated.id, updated);
+      onUpdateSession(updated);
+      if (selectedSession?.id === updated.id) {
+        setSelectedSession(updated);
+      }
+      setEditingSession(null);
+      alert('Hasil ujian siswa berhasil diperbarui!');
+    } catch (err: any) {
+      alert('Gagal memperbarui: ' + (err?.message || 'Terjadi kesalahan'));
+    }
+  };
+
   // Generate Remedial or Enrichment with Gemini AI
   const handleGenerateRemedialEnrichment = async (session: StudentExamSession) => {
     setGeneratingAi(true);
     try {
-      // Find weak questions where score < maxScore
       const weakTopics: string[] = [];
       const strongTopics: string[] = [];
 
@@ -158,19 +276,19 @@ export const ExamResultsTab: React.FC<ExamResultsTabProps> = ({
         <div>
           <div className="flex items-center gap-2 mb-1">
             <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200">
-              Rekapitulasi Asesmen
+              Rekapitulasi Hasil Ujian EduCBT
             </span>
             <span className="text-xs text-slate-500">{exam.subject} • {exam.grade}</span>
           </div>
           <h2 className="text-lg sm:text-xl font-bold text-slate-900">
-            Hasil Ujian, Skoring AI, Remidi &amp; Pengayaan
+            Menu Hasil Ujian: Pilih, Edit, Hapus &amp; Reset Ujian
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            Cetak lembar nilai individu siswa, leger nilai klasikal, serta kirim ke WhatsApp / Email orang tua
+            Kelola hasil peserta, izinkan siswa mengerjakan ulang (reset), edit skor koreksi, dan cetak laporan hasil
           </p>
         </div>
 
-        {/* Print Buttons */}
+        {/* Action Buttons */}
         <div className="flex flex-wrap items-center gap-2">
           {/* Cetak Klasikal Button */}
           <button
@@ -191,6 +309,40 @@ export const ExamResultsTab: React.FC<ExamResultsTabProps> = ({
             <Download className="w-4 h-4 text-emerald-600" />
             <span>Unduh Excel (.xlsx)</span>
           </button>
+        </div>
+      </div>
+
+      {/* Scoring Standards & Calculation Rule Banner */}
+      <div className="bg-gradient-to-r from-blue-50/80 via-indigo-50/60 to-purple-50/80 p-4 rounded-2xl border border-indigo-200 text-xs text-slate-800 space-y-2">
+        <div className="flex items-center gap-2 font-bold text-indigo-950">
+          <Calculator className="w-4 h-4 text-indigo-600" />
+          <span>Aturan Skoring Otomatis &amp; Pembobotan Nilai Akhir:</span>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+          <div className="bg-white/80 p-2.5 rounded-xl border border-indigo-100">
+            <span className="font-bold text-blue-700 block">1. Pilihan Ganda</span>
+            <p className="text-[11px] text-slate-600 mt-0.5">
+              Benar skor <strong>1</strong> • Salah skor <strong>0</strong>.
+            </p>
+          </div>
+          <div className="bg-white/80 p-2.5 rounded-xl border border-indigo-100">
+            <span className="font-bold text-emerald-700 block">2. Isian Jawaban Pendek</span>
+            <p className="text-[11px] text-slate-600 mt-0.5">
+              Benar skor <strong>2</strong> • Salah skor <strong>1</strong> (Penilaian AI berdasarkan kata kunci, sinonim, &amp; kemiripan ide).
+            </p>
+          </div>
+          <div className="bg-white/80 p-2.5 rounded-xl border border-indigo-100">
+            <span className="font-bold text-purple-700 block">3. Uraian / Esai</span>
+            <p className="text-[11px] text-slate-600 mt-0.5">
+              Benar skor <strong>3</strong> • Sebagian <strong>2</strong> • Salah <strong>1</strong> (Penilaian AI berbasis rubrik &amp; ide).
+            </p>
+          </div>
+        </div>
+        <div className="text-[11px] text-indigo-900 bg-white/60 p-2 rounded-lg font-medium flex items-center gap-1.5">
+          <span>🎯</span>
+          <span>
+            <strong>Skor Akhir:</strong> Dihitung dari rerata skor yang didapat per jenis soal dan skor maksimal semua jenis soal, terkonversi skala 0 - 100.
+          </span>
         </div>
       </div>
 
@@ -221,15 +373,72 @@ export const ExamResultsTab: React.FC<ExamResultsTabProps> = ({
         </div>
       </div>
 
+      {/* Multi-action Floating Bar when items are selected */}
+      {selectedSessionIds.length > 0 && (
+        <div className="p-3 bg-slate-900 text-white rounded-2xl shadow-lg flex flex-wrap items-center justify-between gap-3 animate-in fade-in slide-in-from-top-2">
+          <div className="flex items-center gap-3 text-xs">
+            <span className="font-bold px-2.5 py-1 bg-indigo-600 rounded-lg">
+              {selectedSessionIds.length} Siswa Dipilih
+            </span>
+            <span className="text-slate-300">Pilih tindakan massal:</span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {/* Reset Selected */}
+            <button
+              onClick={() => handleResetSessions(selectedSessionIds)}
+              className="px-3 py-1.5 text-xs font-bold rounded-xl bg-amber-500 hover:bg-amber-600 text-white flex items-center gap-1.5 shadow-sm transition"
+              title="Reset ujian agar siswa dapat mengerjakan ulang kembali"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>Reset Ujian ({selectedSessionIds.length})</span>
+            </button>
+
+            {/* Delete Selected */}
+            <button
+              onClick={() => handleDeleteSessions(selectedSessionIds)}
+              className="px-3 py-1.5 text-xs font-bold rounded-xl bg-rose-600 hover:bg-rose-700 text-white flex items-center gap-1.5 shadow-sm transition"
+              title="Hapus permanen hasil ujian terpilih"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Hapus Hasil ({selectedSessionIds.length})</span>
+            </button>
+
+            {/* Clear Selection */}
+            <button
+              onClick={() => setSelectedSessionIds([])}
+              className="p-1.5 text-slate-400 hover:text-white rounded-lg transition"
+              title="Batal Pilih"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* 3. Main Split View: Left Ranking / Students, Right Student Detail Card */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Left Column: Student Submissions List */}
         <div className="lg:col-span-5 space-y-3">
           <div className="flex items-center justify-between">
-            <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider">
-              Daftar Peserta Ujian ({rankedSessions.length} Selesai)
-            </h3>
-            <span className="text-[11px] text-slate-400">Klik untuk melihat detail</span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleToggleSelectAll}
+                className="p-1 text-slate-600 hover:text-slate-900 rounded transition"
+                title={selectedSessionIds.length === rankedSessions.length ? 'Batal Pilih Semua' : 'Pilih Semua'}
+              >
+                {selectedSessionIds.length === rankedSessions.length && rankedSessions.length > 0 ? (
+                  <CheckSquare className="w-4 h-4 text-indigo-600" />
+                ) : (
+                  <Square className="w-4 h-4 text-slate-400" />
+                )}
+              </button>
+              <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                Daftar Peserta ({rankedSessions.length} Selesai)
+              </h3>
+            </div>
+            <span className="text-[11px] text-slate-400">Pilih, edit, hapus, reset</span>
           </div>
 
           <div className="space-y-2">
@@ -240,19 +449,33 @@ export const ExamResultsTab: React.FC<ExamResultsTabProps> = ({
             ) : (
               rankedSessions.map((s, idx) => {
                 const isSelected = selectedSession?.id === s.id;
+                const isChecked = selectedSessionIds.includes(s.id);
                 return (
                   <div
                     key={s.id}
                     onClick={() => setSelectedSession(s)}
-                    className={`p-4 rounded-2xl border cursor-pointer transition flex items-center justify-between ${
+                    className={`p-3.5 rounded-2xl border cursor-pointer transition flex items-center justify-between gap-3 ${
                       isSelected
                         ? 'bg-blue-50/80 border-blue-500 shadow-xs ring-1 ring-blue-500'
                         : 'bg-white border-slate-200 hover:bg-slate-50'
                     }`}
                   >
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      {/* Checkbox for Pilih */}
+                      <button
+                        type="button"
+                        onClick={(e) => handleToggleSelect(s.id, e)}
+                        className="p-1 text-slate-400 hover:text-indigo-600 shrink-0"
+                      >
+                        {isChecked ? (
+                          <CheckSquare className="w-4 h-4 text-indigo-600" />
+                        ) : (
+                          <Square className="w-4 h-4 text-slate-400" />
+                        )}
+                      </button>
+
                       <div
-                        className={`w-7 h-7 rounded-lg flex items-center justify-center font-bold text-xs ${
+                        className={`w-6 h-6 rounded-lg flex items-center justify-center font-bold text-[11px] shrink-0 ${
                           idx === 0
                             ? 'bg-amber-100 text-amber-800'
                             : idx === 1
@@ -262,13 +485,14 @@ export const ExamResultsTab: React.FC<ExamResultsTabProps> = ({
                             : 'bg-slate-100 text-slate-600'
                         }`}
                       >
-                        #{idx + 1}
+                        {idx + 1}
                       </div>
-                      <div>
-                        <h4 className="font-bold text-slate-900 text-xs sm:text-sm leading-snug">
+
+                      <div className="min-w-0">
+                        <h4 className="font-bold text-slate-900 text-xs sm:text-sm truncate">
                           {s.studentName}
                         </h4>
-                        <div className="text-[11px] text-slate-500 flex items-center gap-2">
+                        <div className="text-[11px] text-slate-500 flex items-center gap-1.5 truncate">
                           <span>NISN: {s.studentNisn}</span>
                           <span>•</span>
                           <span>Kelas {s.classRoom}</span>
@@ -276,17 +500,58 @@ export const ExamResultsTab: React.FC<ExamResultsTabProps> = ({
                       </div>
                     </div>
 
-                    <div className="text-right shrink-0">
-                      <span className="text-base font-extrabold text-slate-900 block">
-                        {s.percentage.toFixed(1)}
-                      </span>
-                      <span
-                        className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
-                          s.passedKKM ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
-                        }`}
-                      >
-                        {s.passedKKM ? 'TUNTAS' : 'REMIDI'}
-                      </span>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <div className="text-right">
+                        <span className="text-base font-extrabold text-slate-900 block leading-tight">
+                          {s.percentage.toFixed(1)}
+                        </span>
+                        <span
+                          className={`px-1.5 py-0.2 rounded text-[10px] font-bold ${
+                            s.passedKKM ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
+                          }`}
+                        >
+                          {s.passedKKM ? 'TUNTAS' : 'REMIDI'}
+                        </span>
+                      </div>
+
+                      {/* Quick Action Drop/Buttons */}
+                      <div className="flex items-center gap-1">
+                        {/* Edit Button */}
+                        <button
+                          type="button"
+                          onClick={(e) => handleOpenEditModal(s, e)}
+                          className="p-1.5 text-indigo-600 hover:bg-indigo-50 rounded-lg transition"
+                          title="Edit nilai dan status siswa ini"
+                        >
+                          <Edit3 className="w-3.5 h-3.5" />
+                        </button>
+
+                        {/* Reset Button (ulang ujian) */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleResetSessions([s.id]);
+                          }}
+                          className="p-1.5 text-amber-600 hover:bg-amber-50 rounded-lg transition"
+                          title="Reset ujian agar siswa dapat mengerjakan ulang"
+                        >
+                          <RotateCcw className="w-3.5 h-3.5" />
+                        </button>
+
+                        {/* Delete Button */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteSessions([s.id]);
+                          }}
+                          className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-lg transition"
+                          title="Hapus hasil ujian siswa ini"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </div>
                   </div>
                 );
@@ -315,35 +580,57 @@ export const ExamResultsTab: React.FC<ExamResultsTabProps> = ({
                     </span>
                   </div>
                   <p className="text-xs text-slate-500">
-                    NISN: <span className="font-mono">{selectedSession.studentNisn}</span> • Kelas: {selectedSession.classRoom} • Skor: {selectedSession.totalScore} / {selectedSession.maxTotalScore} ({selectedSession.percentage.toFixed(1)}%)
+                    NISN: <span className="font-mono">{selectedSession.studentNisn}</span> • Kelas: {selectedSession.classRoom} • Nilai: {selectedSession.percentage.toFixed(1)} / 100
                   </p>
                 </div>
 
                 {/* Quick actions for student */}
-                <div className="flex items-center gap-1.5 shrink-0">
-                  {/* Cetak Hasil Individu (Sesuai Permintaan) */}
+                <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                  {/* Edit Siswa Button */}
+                  <button
+                    id="btn-edit-selected-session"
+                    onClick={() => handleOpenEditModal(selectedSession)}
+                    className="px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 flex items-center gap-1 transition"
+                    title="Edit nilai dan status kelulusan"
+                  >
+                    <Edit3 className="w-3.5 h-3.5" />
+                    <span>Edit Nilai</span>
+                  </button>
+
+                  {/* Reset Siswa Button */}
+                  <button
+                    id="btn-reset-selected-session"
+                    onClick={() => handleResetSessions([selectedSession.id])}
+                    className="px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 flex items-center gap-1 transition"
+                    title="Reset agar siswa dapat mengerjakan ulang ujian"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>Reset Ujian</span>
+                  </button>
+
+                  {/* Cetak Hasil Individu */}
                   <button
                     id="btn-print-individual"
                     onClick={() => onOpenPrintModal('individual', selectedSession)}
-                    className="px-3.5 py-2 text-xs font-bold rounded-xl bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-1.5 transition shadow-xs"
+                    className="px-3 py-1.5 text-xs font-bold rounded-lg bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-1 transition shadow-xs"
                     title="Cetak Lembar Hasil Ujian Individu Siswa"
                   >
                     <Printer className="w-3.5 h-3.5" />
-                    <span>Cetak Individu</span>
+                    <span>Cetak</span>
                   </button>
 
-                  {/* Send to WA Orang Tua (Sesuai Permintaan) */}
+                  {/* Send to WA Orang Tua */}
                   <button
                     id="btn-wa-parent"
                     onClick={() => handleSendWhatsApp(selectedSession)}
-                    className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white flex items-center gap-1.5 transition shadow-xs"
+                    className="px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white flex items-center gap-1 transition shadow-xs"
                     title="Kirim Hasil Ujian ke WhatsApp Orang Tua"
                   >
                     <Phone className="w-3.5 h-3.5" />
                     <span>Kirim WA</span>
                   </button>
 
-                  {/* Send Email Orang Tua (Sesuai Permintaan) */}
+                  {/* Send Email Orang Tua */}
                   <button
                     id="btn-email-parent"
                     onClick={() => handleSendEmail(selectedSession)}
@@ -355,7 +642,42 @@ export const ExamResultsTab: React.FC<ExamResultsTabProps> = ({
                 </div>
               </div>
 
-              {/* AI Remidi & Pengayaan Feature Box (Sesuai Permintaan) */}
+              {/* Score by question type breakdown */}
+              {selectedSession.typeScores && (
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="p-3 rounded-xl border border-blue-200 bg-blue-50/50 text-xs space-y-1">
+                    <span className="font-bold text-blue-900 block">Pilihan Ganda</span>
+                    <div className="text-base font-extrabold text-blue-700">
+                      {selectedSession.typeScores.pilihan_ganda.earnedScore} / {selectedSession.typeScores.pilihan_ganda.maxScore} Poin
+                    </div>
+                    <span className="text-[10px] text-blue-600">
+                      Rata-rata: {selectedSession.typeScores.pilihan_ganda.averagePercentage.toFixed(1)}%
+                    </span>
+                  </div>
+
+                  <div className="p-3 rounded-xl border border-emerald-200 bg-emerald-50/50 text-xs space-y-1">
+                    <span className="font-bold text-emerald-900 block">Isian Jawaban Pendek</span>
+                    <div className="text-base font-extrabold text-emerald-700">
+                      {selectedSession.typeScores.isian_singkat.earnedScore} / {selectedSession.typeScores.isian_singkat.maxScore} Poin
+                    </div>
+                    <span className="text-[10px] text-emerald-600">
+                      Rata-rata: {selectedSession.typeScores.isian_singkat.averagePercentage.toFixed(1)}%
+                    </span>
+                  </div>
+
+                  <div className="p-3 rounded-xl border border-purple-200 bg-purple-50/50 text-xs space-y-1">
+                    <span className="font-bold text-purple-900 block">Uraian / Esai</span>
+                    <div className="text-base font-extrabold text-purple-700">
+                      {selectedSession.typeScores.uraian.earnedScore} / {selectedSession.typeScores.uraian.maxScore} Poin
+                    </div>
+                    <span className="text-[10px] text-purple-600">
+                      Rata-rata: {selectedSession.typeScores.uraian.averagePercentage.toFixed(1)}%
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {/* AI Remidi & Pengayaan Feature Box */}
               <div
                 className={`p-5 rounded-2xl border transition ${
                   selectedSession.passedKKM
@@ -535,6 +857,94 @@ export const ExamResultsTab: React.FC<ExamResultsTabProps> = ({
           )}
         </div>
       </div>
+
+      {/* Edit Session Modal */}
+      {editingSession && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
+          <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl border border-slate-200 overflow-hidden space-y-4 p-6">
+            <div className="flex items-center justify-between border-b border-slate-200 pb-3">
+              <div className="flex items-center gap-2">
+                <Edit3 className="w-4 h-4 text-indigo-600" />
+                <h3 className="font-bold text-sm text-slate-900">Edit Nilai Asesmen Siswa</h3>
+              </div>
+              <button
+                onClick={() => setEditingSession(null)}
+                className="text-slate-400 hover:text-slate-600"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div>
+                <span className="text-slate-500 block">Nama Peserta:</span>
+                <span className="font-bold text-slate-900 text-sm">{editingSession.studentName}</span>
+                <span className="text-slate-400 block">NISN: {editingSession.studentNisn} • Kelas {editingSession.classRoom}</span>
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  Nilai Akhir (Skala 0 - 100)
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  step={0.1}
+                  value={editScore}
+                  onChange={(e) => setEditScore(Number(e.target.value))}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm font-bold text-indigo-700 focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  Status Kelulusan KKM ({schoolProfile.defaultKkm})
+                </label>
+                <select
+                  value={editPassed ? 'true' : 'false'}
+                  onChange={(e) => setEditPassed(e.target.value === 'true')}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs font-semibold focus:ring-2 focus:ring-indigo-500 bg-white"
+                >
+                  <option value="true">✅ TUNTAS (Memenuhi KKM)</option>
+                  <option value="false">⚠️ BELUM TUNTAS (Perlu Remidi)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  Catatan Guru (Opsional)
+                </label>
+                <textarea
+                  rows={3}
+                  value={editNotes}
+                  onChange={(e) => setEditNotes(e.target.value)}
+                  placeholder="Catatan koreksi atau evaluasi khusus guru..."
+                  className="w-full p-2.5 border border-slate-300 rounded-xl text-xs focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+            </div>
+
+            <div className="pt-2 border-t border-slate-200 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setEditingSession(null)}
+                className="px-3 py-2 text-xs font-semibold rounded-xl text-slate-600 hover:bg-slate-100"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveEdit}
+                className="px-4 py-2 text-xs font-bold rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white flex items-center gap-1.5 shadow-sm"
+              >
+                <Save className="w-3.5 h-3.5" />
+                <span>Simpan Perubahan</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

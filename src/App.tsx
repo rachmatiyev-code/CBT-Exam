@@ -517,6 +517,17 @@ export default function App() {
               sessions={sessions}
               onUpdateSession={(updated) => {
                 setSessions(sessions.map((s) => (s.id === updated.id ? updated : s)));
+                triggerAutoBackup();
+              }}
+              onDeleteSession={async (sessionId) => {
+                setSessions((prev) => prev.filter((s) => s.id !== sessionId));
+                await apiService.deleteSessionFromServer(sessionId);
+                triggerAutoBackup('Hasil ujian siswa telah dihapus.');
+              }}
+              onResetSessions={async (sessionIds) => {
+                setSessions((prev) => prev.filter((s) => !sessionIds.includes(s.id)));
+                await apiService.batchDeleteSessionsFromServer(sessionIds);
+                triggerAutoBackup(`${sessionIds.length} sesi ujian siswa direset agar dapat mengerjakan ulang.`);
               }}
               onOpenPrintModal={(type, session) => {
                 setPrintConfig({

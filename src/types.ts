@@ -10,11 +10,14 @@ export interface Question {
   question: string;
   options: string[]; // ['A. ...', 'B. ...'] for PG and PG Kompleks
   correctAnswer: string | string[]; // 'A' or ['A', 'C'] or 'mitokondria'
+  image?: string; // Base64 data URL atau URL gambar soal
   keywords?: string[]; // Kata kunci untuk isian & uraian
   concept?: string; // Konsep materi pokok
   rubric?: string; // Rubrik penilaian
   maxScore: number;
   explanation?: string;
+  indicator?: string; // Indikator Soal untuk Kisi-Kisi
+  cognitiveLevel?: 'L1' | 'L2' | 'L3'; // L1=Mudah/Pemahaman, L2=Sedang/Aplikasi, L3=Sukar/Penalaran
 }
 
 export interface Exam {
@@ -106,6 +109,12 @@ export interface StudentExamSession {
   totalScore: number;
   maxTotalScore: number;
   percentage: number;
+  typeScores?: {
+    pg?: { score: number; max: number; percentage: number };
+    isian?: { score: number; max: number; percentage: number };
+    uraian?: { score: number; max: number; percentage: number };
+    avgTypePercentage: number;
+  };
   passedKKM: boolean;
   remedialPlan?: RemedialEnrichmentPlan;
   syncedToGoogleSheet?: boolean;

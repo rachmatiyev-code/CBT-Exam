@@ -14,13 +14,10 @@ function cleanClientKey(key?: string | null): string {
   if (!key) return '';
   let k = String(key).trim();
   if (k.toLowerCase() === 'undefined' || k.toLowerCase() === 'null') return '';
-  k = k.replace(/^["'`]+|["'`]+$/g, '').trim();
-  if (k.startsWith('GEMINI_API_KEY=')) {
-    k = k.replace('GEMINI_API_KEY=', '').trim();
-  }
-  if (k.startsWith('Bearer ')) {
-    k = k.replace('Bearer ', '').trim();
-  }
+  k = k.replace(/[\r\n\t]/g, '').trim();
+  k = k.replace(/^(export\s+|set\s+)?GEMINI_API_KEY\s*=\s*/i, '').trim();
+  k = k.replace(/^Bearer\s+/i, '').trim();
+  k = k.replace(/^["'`{(<\[]+|["'`})>\]]+$/g, '').trim();
   return k;
 }
 
@@ -30,8 +27,16 @@ async function safeParseResponse(res: Response, defaultError: string): Promise<a
   try {
     data = JSON.parse(text);
   } catch {
-    if (text.includes('<!DOCTYPE') || text.includes('<html')) {
-      throw new Error(`Server mengembalikan respon halaman web (Status: ${res.status}). Pastikan endpoint backend berjalan.`);
+    const trimmed = text.trim();
+    const lower = trimmed.toLowerCase();
+    if (
+      lower.startsWith('the page') ||
+      lower.includes('<!doctype') ||
+      lower.includes('<html') ||
+      lower.includes('<body') ||
+      lower.includes('<head')
+    ) {
+      throw new Error(`Koneksi server sedang sibuk atau mengalami kendala jaringan sementara (Status: ${res.status}). Silakan coba sesaat lagi.`);
     }
     throw new Error(`${defaultError} (Respon server tidak valid)`);
   }
@@ -133,6 +138,7 @@ export const apiService = {
   },
 
   async evaluateAnswer(params: {
+    type?: string;
     question: string;
     studentAnswer: string;
     expectedAnswer?: string;
@@ -155,6 +161,30 @@ export const apiService = {
       throw new Error(data.error || 'Gagal evaluasi jawaban');
     }
     return data.evaluation;
+  },
+
+  // Archive exam questions to EduCBT/Riwayat Soal on the server
+  async archiveToEduCBT(exam: any, txtContent?: string): Promise<any> {
+    try {
+      const res = await fetch('/api/educbt/archive-questions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ exam, txtContent }),
+      });
+      return await res.json();
+    } catch (e: any) {
+      return { success: false, error: e.message };
+    }
+  },
+
+  // Get server-side EduCBT archives list
+  async fetchEduCBTArchives(): Promise<any> {
+    try {
+      const res = await fetch('/api/educbt/archives');
+      return await res.json();
+    } catch (e: any) {
+      return { success: false, error: e.message };
+    }
   },
 
   async generateRemedialEnrichment(params: {
@@ -287,6 +317,34 @@ export const apiService = {
     try {
       const res = await fetch(`/api/cbt/sessions/${encodeURIComponent(sessionId)}`, {
         method: 'DELETE',
+      });
+      return await res.json();
+    } catch (e) {
+      return { success: false };
+    }
+  },
+
+  // Batch delete or reset multiple sessions on server
+  async batchDeleteSessionsFromServer(sessionIds: string[], studentIds: string[] = []): Promise<any> {
+    try {
+      const res = await fetch('/api/cbt/sessions/batch-delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionIds, studentIds }),
+      });
+      return await res.json();
+    } catch (e) {
+      return { success: false };
+    }
+  },
+
+  // Update a session on server (manual score edits, answer override)
+  async updateSessionOnServer(sessionId: string, updatedSession: any): Promise<any> {
+    try {
+      const res = await fetch(`/api/cbt/sessions/${encodeURIComponent(sessionId)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ updatedSession }),
       });
       return await res.json();
     } catch (e) {

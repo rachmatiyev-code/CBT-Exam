@@ -3,7 +3,7 @@ import { Printer, X, Download, School, Check, AlertTriangle, Eye, EyeOff, FileTe
 import { Exam, SchoolProfile, StudentExamSession } from '../types';
 
 interface PrintReportModalProps {
-  type: 'individual' | 'classical' | 'questions';
+  type: 'individual' | 'classical' | 'questions' | 'kisi_kisi';
   exam: Exam;
   schoolProfile: SchoolProfile;
   sessions: StudentExamSession[];
@@ -48,6 +48,7 @@ export const PrintReportModal: React.FC<PrintReportModalProps> = ({
               {type === 'individual' && `Pratinjau Cetak Lembar Hasil Siswa: ${individualSession?.studentName}`}
               {type === 'classical' && `Pratinjau Cetak Leger Nilai Klasikal: Kelas ${exam.grade}`}
               {type === 'questions' && `Pratinjau Cetak Naskah Soal Ujian: ${exam.title}`}
+              {type === 'kisi_kisi' && `Pratinjau Cetak Kisi-Kisi Soal Asesmen: ${exam.title}`}
             </span>
           </div>
 
@@ -389,7 +390,7 @@ export const PrintReportModal: React.FC<PrintReportModalProps> = ({
                 </ol>
               </div>
 
-              {/* Questions List */}
+                {/* Questions List */}
               <div className="space-y-6 pt-2">
                 {exam.questions.map((q, idx) => (
                   <div key={q.id} className="space-y-2 break-inside-avoid">
@@ -397,6 +398,17 @@ export const PrintReportModal: React.FC<PrintReportModalProps> = ({
                       <span className="font-bold text-slate-900 w-6 shrink-0">{idx + 1}.</span>
                       <div className="flex-1 space-y-2">
                         <p className="font-medium text-slate-900 leading-relaxed">{q.question}</p>
+
+                        {/* Question Image if present */}
+                        {q.image && (
+                          <div className="my-2 max-w-md">
+                            <img
+                              src={q.image}
+                              alt={`Gambar soal nomor ${idx + 1}`}
+                              className="max-h-56 max-w-full rounded-lg border border-slate-300 object-contain"
+                            />
+                          </div>
+                        )}
 
                         {/* Options */}
                         {q.options && q.options.length > 0 && (
@@ -433,7 +445,13 @@ export const PrintReportModal: React.FC<PrintReportModalProps> = ({
                               <span className="text-emerald-700">
                                 {Array.isArray(q.correctAnswer) ? q.correctAnswer.join(', ') : q.correctAnswer}
                               </span>
-                              {' '}(Bobot: {q.maxScore} Poin)
+                              {' '}(Bobot:{' '}
+                              {q.type === 'pilihan_ganda' || q.type === 'pilihan_ganda_kompleks'
+                                ? '1 Poin'
+                                : q.type === 'isian_singkat'
+                                ? '2 Poin'
+                                : '3 Poin'}
+                              )
                             </div>
                             {q.keywords && q.keywords.length > 0 && (
                               <div>Kata Kunci: {q.keywords.join(', ')}</div>
@@ -446,6 +464,119 @@ export const PrintReportModal: React.FC<PrintReportModalProps> = ({
                     </div>
                   </div>
                 ))}
+              </div>
+            </div>
+          )}
+
+          {/* ==================================================== */}
+          {/* CASE D: KISI-KISI SOAL ASESMEN PRINT REPORT          */}
+          {/* ==================================================== */}
+          {type === 'kisi_kisi' && (
+            <div className="space-y-6 text-xs">
+              <div className="text-center space-y-1">
+                <h3 className="font-bold text-sm uppercase tracking-wider text-slate-900">
+                  KISI-KISI PENULISAN SOAL ASESMEN SUMATIF / UJIAN SEKOLAH
+                </h3>
+                <p className="text-slate-600 font-medium">
+                  Tahun Ajaran {schoolProfile.academicYear || '2025/2026'}
+                </p>
+              </div>
+
+              {/* Identity Matrix */}
+              <div className="grid grid-cols-2 gap-4 border border-slate-300 p-3 rounded-lg bg-slate-50/50">
+                <div className="space-y-1">
+                  <div className="flex">
+                    <span className="w-36 text-slate-600 font-medium">Satuan Pendidikan</span>
+                    <span className="font-bold text-slate-900">: {schoolProfile.name}</span>
+                  </div>
+                  <div className="flex">
+                    <span className="w-36 text-slate-600 font-medium">Mata Pelajaran</span>
+                    <span className="font-bold text-slate-900">: {exam.subject}</span>
+                  </div>
+                  <div className="flex">
+                    <span className="w-36 text-slate-600 font-medium">Kelas / Semester</span>
+                    <span className="font-bold text-slate-900">: {exam.grade} / {exam.semester}</span>
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <div className="flex">
+                    <span className="w-32 text-slate-600 font-medium">Alokasi Waktu</span>
+                    <span className="font-bold text-slate-900">: {exam.durationMinutes} Menit</span>
+                  </div>
+                  <div className="flex">
+                    <span className="w-32 text-slate-600 font-medium">Jumlah Soal</span>
+                    <span className="font-bold text-slate-900">: {exam.questions.length} Butir</span>
+                  </div>
+                  <div className="flex">
+                    <span className="w-32 text-slate-600 font-medium">Bentuk Soal</span>
+                    <span className="font-medium text-slate-900">: PG (1 Poin), Isian (2 Poin), Uraian (3 Poin)</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Kisi-Kisi Table */}
+              <div className="border border-slate-400 rounded-lg overflow-hidden">
+                <table className="w-full border-collapse text-[11px]">
+                  <thead className="bg-slate-100 font-bold border-b border-slate-400 text-slate-900">
+                    <tr>
+                      <th className="p-2 border-r border-slate-300 text-center w-8">No</th>
+                      <th className="p-2 border-r border-slate-300 text-left w-48">Tujuan / CP</th>
+                      <th className="p-2 border-r border-slate-300 text-left w-36">Materi Pokok</th>
+                      <th className="p-2 border-r border-slate-300 text-left">Indikator Soal</th>
+                      <th className="p-2 border-r border-slate-300 text-center w-24">Bentuk</th>
+                      <th className="p-2 border-r border-slate-300 text-center w-16">Level</th>
+                      <th className="p-2 border-r border-slate-300 text-center w-14">Bobot</th>
+                      <th className="p-2 text-center w-20">Kunci</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-300">
+                    {exam.questions.map((q, idx) => {
+                      const typeLabel =
+                        q.type === 'pilihan_ganda'
+                          ? 'PG'
+                          : q.type === 'pilihan_ganda_kompleks'
+                          ? 'PG Kompleks'
+                          : q.type === 'isian_singkat'
+                          ? 'Isian'
+                          : 'Uraian';
+                      const defaultBobot =
+                        q.type === 'pilihan_ganda' || q.type === 'pilihan_ganda_kompleks'
+                          ? '1'
+                          : q.type === 'isian_singkat'
+                          ? '2'
+                          : '3';
+                      const cognitiveLevel = q.cognitiveLevel || (idx % 3 === 0 ? 'L1' : idx % 3 === 1 ? 'L2' : 'L3 (HOTS)');
+                      const indicator = q.indicator || `Disajikan stimulus, peserta didik mampu mengidentifikasi ${q.concept || 'konsep materi'} dengan tepat.`;
+
+                      return (
+                        <tr key={q.id} className="hover:bg-slate-50">
+                          <td className="p-2 text-center border-r border-slate-300 font-mono font-bold">{idx + 1}</td>
+                          <td className="p-2 border-r border-slate-300 leading-tight">
+                            {exam.educationGoal || 'Memahami dan menerapkan konsep pembelajaran sesuai kurikulum.'}
+                          </td>
+                          <td className="p-2 border-r border-slate-300 font-medium">
+                            {q.concept || exam.coreMaterial || 'Materi Pokok'}
+                          </td>
+                          <td className="p-2 border-r border-slate-300 leading-tight text-slate-800">
+                            {indicator}
+                          </td>
+                          <td className="p-2 border-r border-slate-300 text-center font-medium">
+                            {typeLabel}
+                          </td>
+                          <td className="p-2 border-r border-slate-300 text-center font-semibold">
+                            {cognitiveLevel}
+                          </td>
+                          <td className="p-2 border-r border-slate-300 text-center font-bold text-indigo-700">
+                            {defaultBobot} Poin
+                          </td>
+                          <td className="p-2 text-center font-mono font-bold text-emerald-700 truncate max-w-20">
+                            {Array.isArray(q.correctAnswer) ? q.correctAnswer.join(', ') : q.correctAnswer}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
             </div>
           )}

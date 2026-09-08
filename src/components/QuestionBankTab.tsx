@@ -30,6 +30,7 @@ import {
 } from 'lucide-react';
 import { Exam, Question, QuestionType, ExamPackage } from '../types';
 import { excelService } from '../services/gasSync';
+import { apiService } from '../services/api';
 
 interface QuestionBankTabProps {
   exam: Exam;
@@ -40,6 +41,7 @@ interface QuestionBankTabProps {
   onDeletePackage?: (packageId: string) => void;
   onOpenAiGenerator: () => void;
   onOpenPrintQuestions?: () => void;
+  onOpenPrintKisiKisi?: () => void;
   onTriggerBackup: () => void;
 }
 
@@ -52,6 +54,7 @@ export const QuestionBankTab: React.FC<QuestionBankTabProps> = ({
   onDeletePackage,
   onOpenAiGenerator,
   onOpenPrintQuestions,
+  onOpenPrintKisiKisi,
   onTriggerBackup,
 }) => {
   const [filterType, setFilterType] = useState<string>('all');
@@ -366,9 +369,42 @@ export const QuestionBankTab: React.FC<QuestionBankTabProps> = ({
               title="Cetak Naskah Butir Soal Ujian (PDF / Print)"
             >
               <Printer className="w-4 h-4 text-slate-600" />
-              <span>Cetak Naskah Soal</span>
+              <span>Cetak Soal</span>
             </button>
           )}
+
+          {/* Cetak Kisi-Kisi */}
+          {onOpenPrintKisiKisi && (
+            <button
+              id="btn-print-kisi-kisi-toolbar"
+              onClick={onOpenPrintKisiKisi}
+              className="px-3 py-2 text-xs font-semibold rounded-xl bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100 flex items-center gap-1.5 transition shadow-2xs"
+              title="Cetak Format Kisi-Kisi Soal Asesmen (PDF / Print)"
+            >
+              <FileText className="w-4 h-4 text-indigo-600" />
+              <span>Cetak Kisi-Kisi</span>
+            </button>
+          )}
+
+          {/* Simpan ke Arsip EduCBT */}
+          <button
+            id="btn-archive-educbt"
+            onClick={async () => {
+              try {
+                excelService.downloadExamArchive(exam, 'both');
+                await apiService.archiveToEduCBT(exam);
+                setCopiedNotification('Naskah dan Kisi-Kisi berhasil diarsipkan ke EduCBT/Riwayat Soal!');
+                setTimeout(() => setCopiedNotification(null), 3500);
+              } catch (e: any) {
+                alert('Gagal mengarsipkan: ' + (e?.message || 'Error'));
+              }
+            }}
+            className="px-3 py-2 text-xs font-semibold rounded-xl bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100 flex items-center gap-1.5 transition shadow-2xs"
+            title="Arsipkan Naskah ke Folder EduCBT/Riwayat Soal (.json & .txt)"
+          >
+            <FolderArchive className="w-4 h-4 text-amber-700" />
+            <span>Arsip EduCBT</span>
+          </button>
 
           {/* AI Generator Button */}
           <button
@@ -390,7 +426,7 @@ export const QuestionBankTab: React.FC<QuestionBankTabProps> = ({
                 question: '',
                 options: ['A. Pilihan satu', 'B. Pilihan dua', 'C. Pilihan tiga', 'D. Pilihan empat'],
                 correctAnswer: 'A',
-                maxScore: 10,
+                maxScore: 1,
                 explanation: '',
               });
               setIsModalOpen(true);
@@ -504,6 +540,17 @@ export const QuestionBankTab: React.FC<QuestionBankTabProps> = ({
                 <p className="text-slate-900 text-xs sm:text-sm font-medium leading-relaxed">
                   {q.question}
                 </p>
+
+                {/* Question Image if present */}
+                {q.image && (
+                  <div className="my-2">
+                    <img
+                      src={q.image}
+                      alt="Gambar Soal"
+                      className="max-h-48 max-w-full sm:max-w-md rounded-xl border border-slate-200 object-contain bg-slate-50 p-1 shadow-2xs"
+                    />
+                  </div>
+                )}
 
                 {/* Options (For PG & PG Kompleks) */}
                 {q.options && q.options.length > 0 && (
@@ -678,19 +725,25 @@ const QuestionEditorModal: React.FC<QuestionEditorModalProps> = ({ question, onS
           {/* Format selection */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             {[
-              { id: 'pilihan_ganda', label: 'Pilihan Ganda' },
-              { id: 'pilihan_ganda_kompleks', label: 'PG Kompleks' },
-              { id: 'isian_singkat', label: 'Isian Singkat' },
-              { id: 'uraian', label: 'Uraian / Esai' },
+              { id: 'pilihan_ganda', label: 'Pilihan Ganda (1 Poin)', defaultScore: 1 },
+              { id: 'pilihan_ganda_kompleks', label: 'PG Kompleks (1 Poin)', defaultScore: 1 },
+              { id: 'isian_singkat', label: 'Isian Singkat (2 Poin)', defaultScore: 2 },
+              { id: 'uraian', label: 'Uraian / Esai (3 Poin)', defaultScore: 3 },
             ].map((t) => (
               <button
                 key={t.id}
                 type="button"
-                onClick={() => setFormData({ ...formData, type: t.id as QuestionType })}
+                onClick={() =>
+                  setFormData({
+                    ...formData,
+                    type: t.id as QuestionType,
+                    maxScore: t.defaultScore,
+                  })
+                }
                 className={`p-2 rounded-xl border text-center font-semibold transition ${
                   formData.type === t.id
-                    ? 'bg-indigo-600 text-white border-indigo-600'
-                    : 'bg-slate-50 text-slate-700 border-slate-200'
+                    ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs'
+                    : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
                 }`}
               >
                 {t.label}
@@ -711,6 +764,75 @@ const QuestionEditorModal: React.FC<QuestionEditorModalProps> = ({ question, onS
             />
           </div>
 
+          {/* Unggah Gambar Soal (Image Upload) */}
+          <div className="space-y-1.5">
+            <label className="block font-semibold text-slate-700">
+              Unggah Gambar / Ilustrasi Soal (Opsional)
+            </label>
+            {formData.image ? (
+              <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <img
+                    src={formData.image}
+                    alt="Preview Gambar Soal"
+                    className="w-16 h-16 object-contain rounded-lg border border-slate-300 bg-white p-1"
+                  />
+                  <div>
+                    <p className="font-bold text-xs text-slate-800">Gambar Soal Terlampir</p>
+                    <p className="text-[11px] text-slate-500">
+                      Gambar akan otomatis ditampilkan pada kartu soal, pengerjaan siswa, dan cetak naskah.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setFormData({ ...formData, image: undefined })}
+                  className="px-2.5 py-1.5 text-xs font-semibold text-rose-600 hover:bg-rose-50 rounded-lg border border-rose-200 flex items-center gap-1 transition shrink-0"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Hapus
+                </button>
+              </div>
+            ) : (
+              <div className="border-2 border-dashed border-slate-300 rounded-xl p-4 text-center hover:bg-slate-50/70 transition">
+                <input
+                  type="file"
+                  id="upload-question-image-input"
+                  accept="image/png, image/jpeg, image/webp, image/gif"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      if (file.size > 5 * 1024 * 1024) {
+                        alert('Ukuran gambar maksimal 5MB');
+                        return;
+                      }
+                      const reader = new FileReader();
+                      reader.onloadend = () => {
+                        setFormData({ ...formData, image: reader.result as string });
+                      };
+                      reader.readAsDataURL(file);
+                    }
+                  }}
+                  className="hidden"
+                />
+                <label
+                  htmlFor="upload-question-image-input"
+                  className="cursor-pointer flex flex-col items-center gap-1.5"
+                >
+                  <div className="w-8 h-8 rounded-full bg-indigo-50 text-indigo-600 flex items-center justify-center">
+                    <Upload className="w-4 h-4" />
+                  </div>
+                  <span className="font-semibold text-slate-700 text-xs">
+                    Klik untuk Unggah Gambar Soal (PNG, JPG, WEBP)
+                  </span>
+                  <span className="text-[10px] text-slate-400">
+                    Maksimal 5MB. Gambar akan tersimpan aman bersama naskah soal.
+                  </span>
+                </label>
+              </div>
+            )}
+          </div>
+
           {/* Options (Only if PG or PG Kompleks) */}
           {(formData.type === 'pilihan_ganda' || formData.type === 'pilihan_ganda_kompleks') && (
             <div>
@@ -727,7 +849,7 @@ const QuestionEditorModal: React.FC<QuestionEditorModalProps> = ({ question, onS
             </div>
           )}
 
-          {/* Correct Answer */}
+          {/* Correct Answer & Score */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block font-semibold text-slate-700 mb-1">
@@ -746,13 +868,45 @@ const QuestionEditorModal: React.FC<QuestionEditorModalProps> = ({ question, onS
             </div>
 
             <div>
-              <label className="block font-semibold text-slate-700 mb-1">Bobot Skor Maksimal</label>
+              <label className="block font-semibold text-slate-700 mb-1">
+                Bobot Skor Maksimal{' '}
+                <span className="text-slate-400 font-normal">
+                  (Standar: PG=1, Isian=2, Uraian=3)
+                </span>
+              </label>
               <input
                 type="number"
                 min={1}
                 max={100}
                 value={formData.maxScore}
                 onChange={(e) => setFormData({ ...formData, maxScore: Number(e.target.value) })}
+                className="w-full text-xs px-3 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-indigo-500"
+              />
+            </div>
+          </div>
+
+          {/* Kisi-Kisi Metadata: Level Kognitif & Indikator Soal */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">Level Kognitif</label>
+              <select
+                value={formData.cognitiveLevel || 'L2'}
+                onChange={(e) => setFormData({ ...formData, cognitiveLevel: e.target.value })}
+                className="w-full text-xs px-3 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-indigo-500 bg-white"
+              >
+                <option value="L1">L1: Pemahaman / Mengingat</option>
+                <option value="L2">L2: Aplikasi / Penerapan</option>
+                <option value="L3 (HOTS)">L3: Penalaran / HOTS</option>
+              </select>
+            </div>
+
+            <div className="sm:col-span-2">
+              <label className="block font-semibold text-slate-700 mb-1">Indikator Soal (Untuk Kisi-Kisi)</label>
+              <input
+                type="text"
+                value={formData.indicator || ''}
+                onChange={(e) => setFormData({ ...formData, indicator: e.target.value })}
+                placeholder="Disajikan teks/gambar, siswa mampu menganalisis..."
                 className="w-full text-xs px-3 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-indigo-500"
               />
             </div>

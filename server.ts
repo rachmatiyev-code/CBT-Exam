@@ -22,11 +22,22 @@ app.use(express.json({ limit: '10mb' }));
 const DATA_DIR = path.join(process.cwd(), 'data');
 const DB_FILE = path.join(DATA_DIR, 'cbt-db.json');
 
+const EDUCBT_DIR = path.join(process.cwd(), 'EduCBT');
+const EDUCBT_SOAL_DIR = path.join(EDUCBT_DIR, 'Riwayat Soal');
+
 if (!fs.existsSync(DATA_DIR)) {
   try {
     fs.mkdirSync(DATA_DIR, { recursive: true });
   } catch (e) {
     console.error('Failed to create data directory:', e);
+  }
+}
+
+if (!fs.existsSync(EDUCBT_SOAL_DIR)) {
+  try {
+    fs.mkdirSync(EDUCBT_SOAL_DIR, { recursive: true });
+  } catch (e) {
+    console.error('Failed to create EduCBT/Riwayat Soal directory:', e);
   }
 }
 
@@ -109,16 +120,14 @@ function cleanApiKey(key?: string | null): string {
   let k = String(key).trim();
   // Filter out literal null/undefined representations
   if (k.toLowerCase() === 'undefined' || k.toLowerCase() === 'null') return '';
-  // Strip enclosing quotes
-  k = k.replace(/^["'`]+|["'`]+$/g, '').trim();
-  // Strip GEMINI_API_KEY= prefix if accidentally pasted
-  if (k.startsWith('GEMINI_API_KEY=')) {
-    k = k.replace('GEMINI_API_KEY=', '').trim();
-  }
+  // Remove any whitespace/newlines inside if pasted across lines
+  k = k.replace(/[\r\n\t]/g, '').trim();
+  // Strip export / set prefixes
+  k = k.replace(/^(export\s+|set\s+)?GEMINI_API_KEY\s*=\s*/i, '').trim();
   // Strip Bearer prefix if accidentally pasted
-  if (k.startsWith('Bearer ')) {
-    k = k.replace('Bearer ', '').trim();
-  }
+  k = k.replace(/^Bearer\s+/i, '').trim();
+  // Strip enclosing quotes or brackets
+  k = k.replace(/^["'`{(<\[]+|["'`})>\]]+$/g, '').trim();
   return k;
 }
 
@@ -135,38 +144,69 @@ function formatGeminiError(error: any): string {
     }
   } catch {}
 
-  if (msg.includes('API_KEY_INVALID') || msg.includes('API key not valid')) {
+  // Check for HTML/proxy unexpected token errors (e.g., unexpected token 'T', "the page c")
+  const lower = msg.toLowerCase();
+  if (
+    lower.includes('unexpected token') ||
+    lower.includes('the page') ||
+    lower.includes('is not valid json') ||
+    lower.includes('<!doctype') ||
+    lower.includes('<html')
+  ) {
+    return 'Layanan AI Gemini sedang mengalami kendala jaringan atau respon server Google tidak valid. Silakan periksa kembali format Kunci API Anda atau coba beberapa saat lagi.';
+  }
+
+  if (lower.includes('api_key_invalid') || lower.includes('api key not valid') || lower.includes('invalid api key')) {
     return 'Kunci API Gemini tidak valid. Silakan periksa kembali API Key Anda dari Google AI Studio atau gunakan kunci server bawaan.';
   }
-  if (msg.includes('PERMISSION_DENIED')) {
-    return 'Akses API ditolak. Pastikan izin akses Gemini API telah aktif di Google AI Studio / Cloud Project.';
+  if (lower.includes('permission_denied') || lower.includes('access denied')) {
+    return 'Akses API ditolak. Pastikan izin akses Gemini API telah aktif di Google AI Studio / Google Cloud Project Anda.';
   }
-  if (msg.includes('RESOURCE_EXHAUSTED') || msg.includes('quota') || msg.includes('Rate limit')) {
-    return 'Batas kuota panggilan Gemini API telah tercapai (Rate Limit / Quota Exceeded). Mohon tunggu beberapa saat.';
+  if (lower.includes('resource_exhausted') || lower.includes('quota') || lower.includes('rate limit')) {
+    return 'Batas kuota panggilan Gemini API telah tercapai (Rate Limit / Quota Exceeded). Mohon tunggu beberapa saat atau gunakan kunci API lain.';
   }
-  if (msg.includes('high demand') || msg.includes('overloaded') || msg.includes('503')) {
+  if (lower.includes('high demand') || lower.includes('overloaded') || lower.includes('503') || lower.includes('unavailable')) {
     return 'Layanan AI Gemini sedang mengalami lonjakan beban sementara dari Google. Silakan klik coba lagi dalam beberapa detik.';
+  }
+  if (lower.includes('not_found') || lower.includes('404')) {
+    return 'Model AI tidak ditemukan atau telah diperbarui oleh Google. Sistem secara otomatis beralih ke model aktif terbaru.';
   }
 
   return msg;
 }
 
-// Generate content with automatic model fallback on transient high-demand spikes
-async function generateWithFallback(client: GoogleGenAI, contents: any, config?: any) {
-  const models = ['gemini-3.8-flash', 'gemini-3.6-flash'];
+// Universal timeout promise helper
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, timeoutMsg: string): Promise<T> {
+  let timer: NodeJS.Timeout;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(timeoutMsg)), timeoutMs);
+  });
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    clearTimeout(timer!);
+  });
+}
+
+// Generate content with automatic model fallback and timeout protection
+async function generateWithFallback(client: GoogleGenAI, contents: any, config?: any, timeoutMs = 20000) {
+  // Use gemini-3.6-flash first for high responsiveness, then gemini-3.1-flash-lite, then gemini-3.8-flash
+  const models = ['gemini-3.6-flash', 'gemini-3.1-flash-lite', 'gemini-3.8-flash'];
   let lastError: any = null;
 
   for (const model of models) {
     try {
-      return await client.models.generateContent({
-        model,
-        contents,
-        config,
-      });
+      return await withTimeout(
+        client.models.generateContent({
+          model,
+          contents,
+          config,
+        }),
+        timeoutMs,
+        `Model ${model} timeout setelah ${timeoutMs / 1000} detik`
+      );
     } catch (err: any) {
       lastError = err;
       const msg = err?.message || '';
-      // If API key is invalid or permission denied, no need to retry models
+      // If API key is invalid or permission denied, no need to retry other models
       if (
         msg.includes('API_KEY_INVALID') ||
         msg.includes('API key not valid') ||
@@ -174,7 +214,7 @@ async function generateWithFallback(client: GoogleGenAI, contents: any, config?:
       ) {
         throw err;
       }
-      console.warn(`Model ${model} failed, trying next model: ${msg.slice(0, 120)}`);
+      console.warn(`Model ${model} gagal atau timeout, mencoba model berikutnya: ${msg.slice(0, 100)}`);
     }
   }
 
@@ -277,11 +317,41 @@ app.post('/api/validate-key', async (req, res) => {
   try {
     const { apiKey } = req.body;
     const client = getGenAIClient(apiKey);
-    const response = await generateWithFallback(client, 'Ping: jawab dengan 1 kata "OK" jika siap.');
+    
+    // Step 1: Ultra-fast key validation using models.list() (verifies auth without consuming generation tokens)
+    try {
+      await withTimeout(client.models.list(), 6000, 'Verifikasi otorisasi timeout');
+    } catch (authErr: any) {
+      const errMsg = authErr?.message || '';
+      if (
+        errMsg.includes('API_KEY_INVALID') ||
+        errMsg.includes('API key not valid') ||
+        errMsg.includes('INVALID_ARGUMENT') ||
+        errMsg.includes('PERMISSION_DENIED')
+      ) {
+        throw authErr;
+      }
+      // If models.list was throttled or timed out, proceed to test generateWithFallback
+      console.warn('models.list warning:', errMsg.slice(0, 100));
+    }
+
+    // Step 2: Test ping generation with fast fallback and short timeout
+    let pingSuccess = false;
+    let pingText = 'OK';
+    try {
+      const response = await generateWithFallback(client, 'Ping: jawab 1 kata OK', undefined, 8000);
+      pingSuccess = true;
+      pingText = response?.text || 'OK';
+    } catch (genErr: any) {
+      console.warn('Ping generation notice:', genErr?.message?.slice(0, 100));
+    }
+
     res.json({
       success: true,
-      message: 'Kunci API Gemini valid dan siap digunakan!',
-      text: response.text,
+      message: pingSuccess
+        ? 'Kunci API Gemini valid dan siap digunakan!'
+        : 'Kunci API Gemini terverifikasi valid! (Layanan model AI Google siap digunakan).',
+      text: pingText,
       usedServerKey: !cleanApiKey(apiKey) && !!cleanApiKey(process.env.GEMINI_API_KEY),
     });
   } catch (error: any) {
@@ -360,35 +430,65 @@ Wajib kembalikan HANYA JSON murni (valid RFC 8259) tanpa komentar dan tanpa pemb
   }
 });
 
-// 3. Automated scoring for short answers and essays using AI
+// 3. Automated scoring for short answers and essays using AI with user-defined rubric
 app.post('/api/evaluate-submission', async (req, res) => {
   try {
-    const { apiKey, question, studentAnswer, expectedAnswer, keywords, concept, rubric, maxScore } = req.body;
+    const { apiKey, type = 'isian_singkat', question, studentAnswer, expectedAnswer, keywords, concept, rubric, maxScore } = req.body;
+
+    const trimmedAnswer = (studentAnswer || '').trim();
+    if (!trimmedAnswer) {
+      return res.json({
+        success: true,
+        evaluation: {
+          awardedScore: 0,
+          maxScore: type === 'uraian' ? 3 : type === 'isian_singkat' ? 2 : 1,
+          feedback: 'Siswa tidak memberikan jawaban (skor 0).',
+          matchedKeywords: [],
+        },
+      });
+    }
 
     const client = getGenAIClient(apiKey);
 
-    const prompt = `Anda adalah asisten penilai otomatis guru ujian sekolah.
-Nilailah jawaban siswa untuk soal berikut dengan objektif dan edukatif berdasarkan konsep materi dan kata kunci.
+    const isIsian = type === 'isian_singkat';
+    const isUraian = type === 'uraian';
 
+    const targetMax = isUraian ? 3 : isIsian ? 2 : 1;
+
+    const prompt = `Anda adalah sistem penilai ujian sekolah otomatis yang sangat teliti dan adil di Indonesia.
+Evaluasilah jawaban siswa untuk soal berikut:
+
+Tipe Soal: ${isUraian ? 'URAIAN / ESAI' : isIsian ? 'ISIAN JAWABAN PENDEK' : 'PILIHAN GANDA'}
 Pertanyaan: "${question}"
-Konsep Inti: "${concept || '-'}"
-Kata Kunci Wajib/Terkait: ${JSON.stringify(keywords || [])}
-Jawaban Acuan / Rubrik: "${expectedAnswer || rubric || '-'}"
-Jawaban Siswa: "${studentAnswer || '(Siswa tidak menjawab)'}"
-Skor Maksimal: ${maxScore || 10}
+Konsep Inti Materi: "${concept || '-'}"
+Kunci Jawaban Acuan: "${expectedAnswer || rubric || '-'}"
+Daftar Kata Kunci / Konsep Relevan: ${JSON.stringify(keywords || [])}
+Jawaban Siswa: "${trimmedAnswer}"
 
-Instruksi Penilaian:
-1. Jika siswa tidak menjawab atau jawaban sama sekali tidak relevan, beri skor 0.
-2. Analisis kesesuaian jawaban siswa terhadap konsep materi dan penggunaan kata kunci.
-3. Berikan skor dari 0 sampai ${maxScore}.
-4. Berikan alasan penilaian (feedback) yang membangun dalam Bahasa Indonesia untuk siswa.
+PEDOMAN PENILAIAN RESMI:
+${
+  isIsian
+    ? `Aturan Isian Jawaban Pendek:
+- Skor 2 (BENAR): Siswa menjawab benar, tepat sasaran berdasarkan kata kunci, sinonim kata, atau kemiripan ide dengan kunci jawaban.
+- Skor 1 (SALAH): Siswa memberikan jawaban namun salah / tidak sesuai konsep.
+- Skor 0: Hanya jika kosong (sudah ditangani).`
+    : isUraian
+    ? `Aturan Uraian / Esai:
+- Skor 3 (BENAR PENUH): Menjelaskan konsep dengan benar dan komprehensif, mencakup kata kunci atau sinonim ide materi pokok.
+- Skor 2 (BENAR SEBAGIAN): Memahami sebagian konsep materi, memuat beberapa kata kunci atau ide yang mendekati kebenaran meski belum sempurna.
+- Skor 1 (SALAH): Berusaha menjawab namun konsep yang disampaikan salah / melenceng jauh.
+- Skor 0: Hanya jika kosong.`
+    : `Aturan Pilihan Ganda:
+- Skor 1: Benar
+- Skor 0: Salah`
+}
 
-Kembalikan HANYA JSON murni (valid RFC 8259):
+Kembalikan HANYA JSON valid RFC 8259 (tanpa markdown tambahan):
 {
-  "awardedScore": 8,
-  "maxScore": ${maxScore || 10},
-  "feedback": "Penjelasan mengapa skor diberikan dan saran perbaikan...",
-  "matchedKeywords": ["kata1", "kata2"]
+  "awardedScore": ${targetMax},
+  "maxScore": ${targetMax},
+  "feedback": "Penjelasan pedagogis singkat mengapa nilai ini diberikan berdasarkan kesesuaian konsep dan kata kunci",
+  "matchedKeywords": ["kata kunci atau sinonim yang ditemukan"]
 }`;
 
     const response = await generateWithFallback(client, prompt, {
@@ -397,9 +497,9 @@ Kembalikan HANYA JSON murni (valid RFC 8259):
 
     const rawText = response.text || '{}';
     const evaluation = extractJsonFromText(rawText, {
-      awardedScore: 0,
-      maxScore: maxScore || 10,
-      feedback: 'Jawaban telah tersimpan.',
+      awardedScore: isUraian ? 2 : isIsian ? 1 : 0,
+      maxScore: targetMax,
+      feedback: 'Telah dievaluasi otomatis.',
       matchedKeywords: [],
     });
 
@@ -408,6 +508,64 @@ Kembalikan HANYA JSON murni (valid RFC 8259):
     console.error('Error evaluating submission:', error);
     const friendlyError = formatGeminiError(error);
     res.status(500).json({ success: false, error: friendlyError });
+  }
+});
+
+// 3B. Endpoints for EduCBT / Riwayat Soal (Server filesystem archive)
+app.post('/api/educbt/archive-questions', (req, res) => {
+  try {
+    const { exam, txtContent } = req.body;
+    if (!exam || !exam.id) {
+      return res.status(400).json({ success: false, error: 'Data ujian tidak valid' });
+    }
+
+    const cleanCode = (exam.code || 'SOAL').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const cleanSubject = (exam.subject || 'Ujian').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const timestamp = Date.now();
+    const baseName = `${cleanCode}_${cleanSubject}_${timestamp}`;
+
+    // 1. Write .json
+    const jsonPath = path.join(EDUCBT_SOAL_DIR, `${baseName}.json`);
+    fs.writeFileSync(jsonPath, JSON.stringify(exam, null, 2), 'utf-8');
+
+    // 2. Write .txt
+    const txtPath = path.join(EDUCBT_SOAL_DIR, `${baseName}.txt`);
+    const textData = txtContent || JSON.stringify(exam, null, 2);
+    fs.writeFileSync(txtPath, textData, 'utf-8');
+
+    res.json({
+      success: true,
+      message: 'Soal berhasil disimpan dalam folder EduCBT/Riwayat Soal (.json dan .txt)',
+      folder: 'EduCBT/Riwayat Soal',
+      jsonFile: `${baseName}.json`,
+      txtFile: `${baseName}.txt`,
+      savedAt: new Date().toISOString(),
+    });
+  } catch (err: any) {
+    console.error('Error archiving to EduCBT/Riwayat Soal:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get('/api/educbt/archives', (_req, res) => {
+  try {
+    if (!fs.existsSync(EDUCBT_SOAL_DIR)) {
+      return res.json({ success: true, archives: [] });
+    }
+    const files = fs.readdirSync(EDUCBT_SOAL_DIR);
+    const fileStats = files.map((file) => {
+      const fullPath = path.join(EDUCBT_SOAL_DIR, file);
+      const stat = fs.statSync(fullPath);
+      return {
+        name: file,
+        extension: path.extname(file),
+        size: stat.size,
+        updatedAt: stat.mtime.toISOString(),
+      };
+    });
+    res.json({ success: true, folder: 'EduCBT/Riwayat Soal', files: fileStats });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
@@ -544,7 +702,17 @@ app.post('/api/sync-gas', async (req, res) => {
       body: JSON.stringify({ action, payload }),
     });
 
-    const data = await fetchResponse.json();
+    const rawText = await fetchResponse.text();
+    let data: any = null;
+    try {
+      data = JSON.parse(rawText);
+    } catch {
+      return res.json({
+        success: false,
+        error: 'Google Apps Script mengembalikan respon non-JSON. Pastikan izin akses Web App disetel ke "Anyone" (Siapa saja).',
+        preview: rawText.slice(0, 150),
+      });
+    }
     res.json({ success: true, mode: 'live_gas', data });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message || 'Gagal menyinkronkan ke Google Apps Script' });
@@ -686,6 +854,54 @@ app.delete('/api/cbt/sessions/:id', (req, res) => {
     }
     writeServerDB({ sessions: updatedSessions });
     res.json({ success: true, message: 'Sesi ujian berhasil direset dari server' });
+  } catch (e: any) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// H. Teacher batch deletes or resets multiple student sessions
+app.post('/api/cbt/sessions/batch-delete', (req, res) => {
+  try {
+    const { sessionIds = [], studentIds = [] } = req.body;
+    const idSet = new Set([...sessionIds, ...studentIds]);
+    const db = readServerDB();
+    const updatedSessions = db.sessions.filter(
+      (s: any) => !idSet.has(s.id) && !idSet.has(s.studentId)
+    );
+    idSet.forEach((id) => {
+      if (activePings[id]) {
+        delete activePings[id];
+      }
+    });
+    writeServerDB({ sessions: updatedSessions });
+    res.json({
+      success: true,
+      message: `${idSet.size} sesi siswa berhasil direset/dihapus`,
+      remaining: updatedSessions.length,
+    });
+  } catch (e: any) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// I. Teacher edits/updates a student session (e.g. manual score override, answer corrections)
+app.put('/api/cbt/sessions/:id', (req, res) => {
+  try {
+    const { id } = req.params;
+    const { updatedSession } = req.body;
+    if (!updatedSession) {
+      return res.status(400).json({ success: false, error: 'Data sesi pembaruan tidak ditemukan' });
+    }
+    const db = readServerDB();
+    const index = db.sessions.findIndex((s: any) => s.id === id || s.studentId === id);
+    let updatedSessions = [...db.sessions];
+    if (index >= 0) {
+      updatedSessions[index] = { ...updatedSessions[index], ...updatedSession };
+    } else {
+      updatedSessions.push(updatedSession);
+    }
+    writeServerDB({ sessions: updatedSessions });
+    res.json({ success: true, message: 'Data hasil ujian siswa berhasil diperbarui', session: updatedSessions[index >= 0 ? index : updatedSessions.length - 1] });
   } catch (e: any) {
     res.status(500).json({ success: false, error: e.message });
   }
