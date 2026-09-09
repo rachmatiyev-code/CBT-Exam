@@ -23,7 +23,7 @@ function cleanClientKey(key?: string | null): string {
   return k;
 }
 
-async function safeParseResponse(res: Response, defaultError: string): Promise<any> {
+async function safeParseResponse(res: Response, defaultError: string, endpointName?: string): Promise<any> {
   const text = await res.text();
   let data: any = null;
   try {
@@ -31,6 +31,14 @@ async function safeParseResponse(res: Response, defaultError: string): Promise<a
   } catch {
     const trimmed = text.trim();
     const lower = trimmed.toLowerCase();
+    console.error(`[API Parse Error] ${endpointName || 'Request'} returned non-JSON. Status: ${res.status}`, text.slice(0, 300));
+
+    if (res.status === 404) {
+      throw new Error(
+        `Layanan mengembalikan 404 (Not Found).\n\nJika ini pengujian Google Apps Script:\n1. Pastikan opsi 'Who has access' disetel ke 'Anyone' (Siapa saja).\n2. Pastikan menyalin Web App URL berakhiran '/exec' (bukan /edit atau /dev).\n3. Pastikan memilih 'New version' saat deployment.`
+      );
+    }
+
     if (
       lower.startsWith('the page') ||
       lower.includes('<!doctype') ||
@@ -42,6 +50,11 @@ async function safeParseResponse(res: Response, defaultError: string): Promise<a
     }
     throw new Error(`${defaultError} (Respon server tidak valid)`);
   }
+
+  if (res.status === 404 && data?.error) {
+    throw new Error(data.error);
+  }
+
   return data;
 }
 
@@ -99,6 +112,13 @@ export const apiService = {
 
   async generateQuestions(params: GenerateQuestionsParams): Promise<any> {
     const apiKey = this.getStoredApiKey();
+    console.info('[API Request] /api/generate-questions', {
+      subject: params.subject,
+      grade: params.grade,
+      count: params.count,
+      types: params.types,
+      hasApiKey: !!apiKey,
+    });
     const res = await fetch('/api/generate-questions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -107,7 +127,12 @@ export const apiService = {
         ...params,
       }),
     });
-    const data = await safeParseResponse(res, 'Gagal generate soal');
+    const data = await safeParseResponse(res, 'Gagal generate soal', '/api/generate-questions');
+    console.info('[API Response] /api/generate-questions', {
+      status: res.status,
+      success: data?.success,
+      count: data?.questions?.length || 0,
+    });
     if (!data.success) {
       throw new Error(data.error || 'Gagal generate soal');
     }
@@ -214,12 +239,20 @@ export const apiService = {
   },
 
   async syncWithGAS(action: string, payload: any, webAppUrl?: string): Promise<any> {
+    const maskedUrl = webAppUrl ? `${webAppUrl.slice(0, 35)}...${webAppUrl.slice(-10)}` : '(local simulated)';
+    console.info(`[API Request] /api/sync-gas action="${action}" target="${maskedUrl}"`, {
+      action,
+      payloadType: typeof payload,
+      hasWebAppUrl: !!webAppUrl,
+    });
     const res = await fetch('/api/sync-gas', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action, payload, webAppUrl }),
     });
-    return safeParseResponse(res, 'Gagal sinkronisasi Google Apps Script');
+    const data = await safeParseResponse(res, 'Gagal sinkronisasi Google Apps Script', '/api/sync-gas');
+    console.info(`[API Response] /api/sync-gas action="${action}" status=${res.status}`, data);
+    return data;
   },
 
   // ==========================================
@@ -238,20 +271,29 @@ export const apiService = {
     }
   },
 
-  // Teacher synchronizes exam, school profile, students, and packages to server
+  // Teacher synchronizes exam, school profile, students, classes, and packages to server
   async syncTeacherToServer(payload: {
     exam?: any;
     schoolProfile?: any;
     students?: any[];
+    classes?: string[];
     packages?: any[];
   }): Promise<any> {
     try {
+      console.info('[API Request] /api/cbt/sync-teacher', {
+        hasExam: !!payload.exam,
+        studentsCount: payload.students?.length,
+        classesCount: payload.classes?.length,
+        packagesCount: payload.packages?.length,
+      });
       const res = await fetch('/api/cbt/sync-teacher', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      return await res.json();
+      const data = await res.json();
+      console.info('[API Response] /api/cbt/sync-teacher', data);
+      return data;
     } catch (e) {
       console.warn('Gagal sinkronisasi data guru ke server:', e);
       return { success: false };

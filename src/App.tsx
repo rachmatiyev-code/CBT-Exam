@@ -57,6 +57,20 @@ export default function App() {
     return saved ? JSON.parse(saved) : initialStudents;
   });
 
+  const [classes, setClasses] = useState<string[]>(() => {
+    const saved = localStorage.getItem('educbt_classes');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      } catch {}
+    }
+    const defaultClasses = Array.from(
+      new Set(initialStudents.map((s) => s.classRoom).filter(Boolean))
+    ).sort();
+    return defaultClasses.length > 0 ? defaultClasses : ['IX-A', 'IX-B', 'IX-C'];
+  });
+
   const [sessions, setSessions] = useState<StudentExamSession[]>(() => {
     const saved = localStorage.getItem('educbt_sessions');
     return saved ? JSON.parse(saved) : initialSessions;
@@ -123,6 +137,9 @@ export default function App() {
           if (sExam) setExam(sExam);
           if (sSchool) setSchoolProfile(sSchool);
           if (sStudents && sStudents.length > 0) setStudents(sStudents);
+          if (res.data.classes && Array.isArray(res.data.classes) && res.data.classes.length > 0) {
+            setClasses(res.data.classes);
+          }
           if (sPackages && sPackages.length > 0) setExamPackages(sPackages);
           if (sSessions && sSessions.length > 0) setSessions(sSessions);
 
@@ -132,6 +149,7 @@ export default function App() {
               exam,
               schoolProfile,
               students,
+              classes,
               packages: examPackages,
             });
           }
@@ -202,8 +220,13 @@ export default function App() {
 
   useEffect(() => {
     localStorage.setItem('educbt_students', JSON.stringify(students));
-    apiService.syncTeacherToServer({ students });
+    apiService.syncTeacherToServer({ students, classes });
   }, [students]);
+
+  useEffect(() => {
+    localStorage.setItem('educbt_classes', JSON.stringify(classes));
+    apiService.syncTeacherToServer({ classes, students });
+  }, [classes]);
 
   useEffect(() => {
     localStorage.setItem('educbt_sessions', JSON.stringify(sessions));
@@ -478,6 +501,11 @@ export default function App() {
               onUpdateStudents={(updated) => {
                 setStudents(updated);
                 triggerAutoBackup('Data peserta ujian diperbarui dan disinkronkan.');
+              }}
+              classes={classes}
+              onUpdateClasses={(updated) => {
+                setClasses(updated);
+                triggerAutoBackup('Daftar kelas rombel diperbarui.');
               }}
               onTriggerBackup={() => triggerAutoBackup()}
             />

@@ -5,25 +5,27 @@ export const APPS_SCRIPT_CODE = `/**
  * =========================================================================
  * GOOGLE APPS SCRIPT (Code.gs) - EDU-CBT AI & GOOGLE SHEETS & DRIVE ENGINE
  * =========================================================================
- * Panduan Pemasangan:
- * 1. Buat Google Spreadsheet baru di Google Drive Anda.
+ * Panduan Pemasangan Agar TIDAK Mengalami Error 404:
+ * 1. Buka Google Spreadsheet baru di Google Drive Anda.
  * 2. Buka menu Extensions (Ekstensi) > Apps Script.
- * 3. Hapus kode bawaan dan tempel (paste) seluruh kode ini.
- * 4. Klik "Deploy" (Terapkan) > "New deployment" (Penerapan Baru).
- * 5. Pilih jenis "Web app" (Aplikasi Web).
+ * 3. Hapus kode bawaan lalu tempel (paste) seluruh kode ini.
+ * 4. Klik ikon "Save" (Disket).
+ * 5. Klik tombol "Deploy" (Terapkan) di pojok kanan atas > pilih "New deployment" (Penerapan baru).
+ * 6. Pada ikon roda gigi (Select type), pilih "Web app".
  *    - Description: EduCBT AI Integration Web App
- *    - Execute as: Me (Email Anda)
- *    - Who has access: Anyone (Siapa saja)
- * 6. Klik Deploy, beri izin akses (Review Permissions > Allow).
- * 7. Salin Web App URL dan tempel ke menu "Integrasi Google Apps Script" di aplikasi EduCBT AI.
+ *    - Execute as: Me (Email Google Anda)
+ *    - Who has access: Anyone (Siapa saja)  <-- WAJIB "Anyone", BUKAN "Only myself"
+ * 7. Klik "Deploy" dan selesaikan izin akses (Review Permissions > pilih akun > Advanced > Go to (unsafe) > Allow).
+ * 8. Salin "Web app URL" yang berakhiran "/exec" (BUKAN yang berakhiran /edit atau /dev).
+ * 9. Tempelkan Web App URL tersebut ke menu "Integrasi Google Apps Script" di aplikasi EduCBT AI.
  */
 
-// Konstanta Nama Folder Khusus Backup & Arsip di Google Drive
+// Nama Folder Khusus Penyimpanan di Google Drive
 const ROOT_FOLDER_NAME = "EduCBT";
 const SUB_FOLDER_SOAL = "Riwayat Soal";
 const SUB_FOLDER_HASIL = "Hasil Ujian";
 
-// Inisialisasi atau Dapatkan Struktur Folder Khusus EduCBT di Google Drive
+// Inisialisasi atau dapatkan folder di Google Drive
 function getOrCreateBackupFolders() {
   var rootFolders = DriveApp.getFoldersByName(ROOT_FOLDER_NAME);
   var rootFolder;
@@ -33,11 +35,9 @@ function getOrCreateBackupFolders() {
     rootFolder = DriveApp.createFolder(ROOT_FOLDER_NAME);
   }
 
-  // Sub folder "Riwayat Soal"
   var soalFolders = rootFolder.getFoldersByName(SUB_FOLDER_SOAL);
   var soalFolder = soalFolders.hasNext() ? soalFolders.next() : rootFolder.createFolder(SUB_FOLDER_SOAL);
 
-  // Sub folder "Hasil Ujian"
   var hasilFolders = rootFolder.getFoldersByName(SUB_FOLDER_HASIL);
   var hasilFolder = hasilFolders.hasNext() ? hasilFolders.next() : rootFolder.createFolder(SUB_FOLDER_HASIL);
 
@@ -48,30 +48,70 @@ function getOrCreateBackupFolders() {
   };
 }
 
-// Endpoint GET untuk status pemeriksaan koneksi
-function doGet(e) {
-  var folders = getOrCreateBackupFolders();
-  return ContentService.createTextOutput(JSON.stringify({
-    status: "success",
-    message: "Koneksi Google Apps Script, Google Sheets & Google Drive (Folder EduCBT/Riwayat Soal) Aktif!",
-    rootFolderId: folders.root.getId(),
-    soalFolderId: folders.soal.getId(),
-    hasilFolderId: folders.hasil.getId(),
-    timestamp: new Date().toISOString()
-  })).setMimeType(ContentService.MimeType.JSON);
+// Dapatkan atau buat Spreadsheet untuk penampungan nilai
+function getTargetSpreadsheet() {
+  try {
+    var activeSS = SpreadsheetApp.getActiveSpreadsheet();
+    if (activeSS) return activeSS;
+  } catch (e) {}
+
+  // Fallback jika script dibuat secara standalone (di script.google.com langsung)
+  var files = DriveApp.getFilesByName("EduCBT_Rekap_Nilai_Siswa");
+  if (files.hasNext()) {
+    return SpreadsheetApp.open(files.next());
+  }
+  return SpreadsheetApp.create("EduCBT_Rekap_Nilai_Siswa");
 }
 
-// Endpoint POST untuk sinkronisasi data dari EduCBT AI
+// Endpoint GET: Dipanggil saat URL dibuka di browser atau diuji via GET
+function doGet(e) {
+  try {
+    var folders = getOrCreateBackupFolders();
+    var ss = getTargetSpreadsheet();
+    return ContentService.createTextOutput(JSON.stringify({
+      status: "success",
+      message: "✅ Web App EduCBT AI Aktif & Berhasil Terhubung ke Google Sheets & Google Drive!",
+      spreadsheetName: ss ? ss.getName() : "Aktif",
+      folders: {
+        root: folders.root.getName(),
+        soal: folders.soal.getName(),
+        hasil: folders.hasil.getName()
+      },
+      timestamp: new Date().toISOString()
+    })).setMimeType(ContentService.MimeType.JSON);
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({
+      status: "warning",
+      message: "Web App aktif namun memerlukan persetujuan izin akses Google Drive: " + err.toString(),
+      timestamp: new Date().toISOString()
+    })).setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+// Endpoint POST: Menerima sinkronisasi data dari EduCBT AI
 function doPost(e) {
   try {
-    var data = JSON.parse(e.postData.contents);
-    var action = data.action;
-    var payload = data.payload;
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var folders = getOrCreateBackupFolders();
+    var data = {};
+    if (e && e.postData && e.postData.contents) {
+      data = JSON.parse(e.postData.contents);
+    }
+    var action = data.action || (e && e.parameter && e.parameter.action) || "test_connection";
+    var payload = data.payload || {};
 
+    var folders = getOrCreateBackupFolders();
+    var ss = getTargetSpreadsheet();
+
+    // 1. Uji Koneksi / Ping Webhook
+    if (action === "test_connection" || action === "ping") {
+      return ContentService.createTextOutput(JSON.stringify({
+        status: "success",
+        message: "Koneksi Google Apps Script, Google Sheets, dan Google Drive aktif dan siap menerima data!",
+        timestamp: new Date().toISOString()
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // 2. Simpan Rekap Nilai Siswa
     if (action === "sync_exam_result") {
-      // Simpan rekap nilai siswa ke Sheet "Rekap_Nilai"
       var sheet = ss.getSheetByName("Rekap_Nilai");
       if (!sheet) {
         sheet = ss.insertSheet("Rekap_Nilai");
@@ -91,25 +131,24 @@ function doPost(e) {
 
       sheet.appendRow([
         new Date(),
-        payload.examId,
+        payload.examId || "-",
         payload.subject || "-",
-        payload.studentNisn,
-        payload.studentName,
-        payload.classRoom,
+        payload.studentNisn || "-",
+        payload.studentName || "-",
+        payload.classRoom || "-",
         pgText,
         isianText,
         uraianText,
-        payload.totalScore,
-        payload.maxTotalScore,
-        (typeScores.avgTypePercentage ? typeScores.avgTypePercentage.toFixed(1) : payload.percentage.toFixed(1)) + "%",
-        payload.percentage.toFixed(1),
+        payload.totalScore || 0,
+        payload.maxTotalScore || 100,
+        (typeScores.avgTypePercentage ? typeScores.avgTypePercentage.toFixed(1) : (payload.percentage || 0).toFixed(1)) + "%",
+        (payload.percentage || 0).toFixed(1),
         payload.passedKKM ? "TUNTAS" : "REMIDI",
         payload.tabSwitchCount || 0,
         payload.remedialPlan ? (payload.remedialPlan.type.toUpperCase() + ": " + payload.remedialPlan.headline) : "-"
       ]);
 
-      // Buat backup file JSON hasil pengerjaan di Google Drive folder EduCBT / Hasil Ujian
-      var fileName = "Hasil_" + payload.studentNisn + "_" + payload.studentName.replace(/\s+/g, '_') + "_" + new Date().getTime() + ".json";
+      var fileName = "Hasil_" + (payload.studentNisn || "NISN") + "_" + (payload.studentName || "Siswa").replace(/\\s+/g, '_') + "_" + new Date().getTime() + ".json";
       folders.hasil.createFile(fileName, JSON.stringify(payload, null, 2), MimeType.PLAIN_TEXT);
 
       return ContentService.createTextOutput(JSON.stringify({
@@ -119,15 +158,13 @@ function doPost(e) {
       })).setMimeType(ContentService.MimeType.JSON);
     }
 
+    // 3. Backup Naskah Soal Asesmen
     if (action === "backup_question_bank") {
-      // Simpan arsip soal dalam format .json dan .txt di subfolder EduCBT / Riwayat Soal
-      var baseName = (payload.code || "SOAL") + "_" + (payload.subject || "Ujian").replace(/\s+/g, '_') + "_" + (payload.title ? payload.title.replace(/\s+/g, '_').substring(0, 25) : "BankSoal");
+      var baseName = (payload.code || "SOAL") + "_" + (payload.subject || "Ujian").replace(/\\s+/g, '_') + "_" + (payload.title ? payload.title.replace(/\\s+/g, '_').substring(0, 25) : "BankSoal");
       
-      // 1. Simpan format .json
       var jsonFileName = baseName + ".json";
       folders.soal.createFile(jsonFileName, JSON.stringify(payload, null, 2), MimeType.PLAIN_TEXT);
 
-      // 2. Simpan format .txt
       var txtContent = payload.txtContent || JSON.stringify(payload, null, 2);
       var txtFileName = baseName + ".txt";
       folders.soal.createFile(txtFileName, txtContent, MimeType.PLAIN_TEXT);
@@ -140,18 +177,16 @@ function doPost(e) {
       })).setMimeType(ContentService.MimeType.JSON);
     }
 
-    return ContentService.createTextOutput(JSON.stringify({
-      status: "error",
-      message: "Aksi tidak dikenal: " + action
-    })).setMimeType(ContentService.MimeType.JSON);
-
-  } catch (err) {
-    return ContentService.createTextOutput(JSON.stringify({
-      status: "error",
-      error: err.toString()
-    })).setMimeType(ContentService.MimeType.JSON);
-  }
-}
+    // 4. Backup Seluruh Data Sistem (Sekolah, Siswa, Soal, Sesi)
+    if (action === "backup_all") {
+      var fullBackupName = "Backup_EduCBT_Lengkap_" + new Date().getTime() + ".json";
+      folders.root.createFile(fullBackupName, JSON.stringify(payload, null, 2), MimeType.PLAIN_TEXT);
+      return ContentService.createTextOutput(JSON.stringify({
+        status: "success",
+        message: "Data lengkap EduCBT berhasil dicadangkan ke Google Drive folder EduCBT!",
+        fileName: fullBackupName
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
 
     return ContentService.createTextOutput(JSON.stringify({
       status: "error",

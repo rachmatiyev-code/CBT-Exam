@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   School,
   Users,
@@ -18,9 +18,13 @@ import {
   Layers,
   Eye,
   BookmarkPlus,
+  Check,
+  FolderPlus,
+  ArrowUpDown,
 } from 'lucide-react';
 import { SchoolProfile, Student, StudentDraft } from '../types';
 import { excelService } from '../services/gasSync';
+import { apiService } from '../services/api';
 import { StudentDraftModal } from './StudentDraftModal';
 import { StudentTemplateModal } from './StudentTemplateModal';
 
@@ -29,6 +33,8 @@ interface SchoolAndStudentsTabProps {
   onUpdateSchool: (updated: SchoolProfile) => void;
   students: Student[];
   onUpdateStudents: (updated: Student[]) => void;
+  classes?: string[];
+  onUpdateClasses?: (classes: string[]) => void;
   onTriggerBackup: () => void;
 }
 
@@ -37,6 +43,8 @@ export const SchoolAndStudentsTab: React.FC<SchoolAndStudentsTabProps> = ({
   onUpdateSchool,
   students,
   onUpdateStudents,
+  classes = [],
+  onUpdateClasses,
   onTriggerBackup,
 }) => {
   const [profileForm, setProfileForm] = useState<SchoolProfile>({ ...schoolProfile });
@@ -50,21 +58,67 @@ export const SchoolAndStudentsTab: React.FC<SchoolAndStudentsTabProps> = ({
   const [isDraftModalOpen, setIsDraftModalOpen] = useState(false);
   const [isTemplateModalOpen, setIsTemplateModalOpen] = useState(false);
   const [toastNotification, setToastNotification] = useState<string | null>(null);
+  const [isSavingAll, setIsSavingAll] = useState(false);
+  const [renamingClass, setRenamingClass] = useState<string | null>(null);
+  const [renamedValue, setRenamedValue] = useState('');
+
+  // Combined distinct classes from both props and student roster
+  const activeClasses = useMemo(() => {
+    const set = new Set<string>();
+    classes.forEach((c) => {
+      if (c && c.trim()) set.add(c.trim().toUpperCase());
+    });
+    students.forEach((s) => {
+      if (s.classRoom && s.classRoom.trim()) set.add(s.classRoom.trim().toUpperCase());
+    });
+    const list = Array.from(set).sort();
+    return list.length > 0 ? list : ['IX-A', 'IX-B', 'IX-C'];
+  }, [classes, students]);
+
+  const showToast = (msg: string) => {
+    setToastNotification(msg);
+    setTimeout(() => setToastNotification(null), 3000);
+  };
 
   const handleLoadDraftStudent = (draft: StudentDraft, mode: 'append' | 'replace') => {
     const updated = mode === 'replace' ? draft.students : [...students, ...draft.students];
     onUpdateStudents(updated);
     onTriggerBackup();
+    showToast(`Draft siswa dimuat (${draft.students.length} siswa)`);
   };
 
   const handleImportTemplateStudents = (imported: Student[], mode: 'append' | 'replace') => {
     const updated = mode === 'replace' ? imported : [...students, ...imported];
     onUpdateStudents(updated);
     onTriggerBackup();
+    showToast(`${imported.length} siswa berhasil diimpor!`);
   };
 
-  // Distinct classes
-  const classes = Array.from(new Set(students.map((s) => s.classRoom).filter(Boolean))).sort();
+  // Simpan Data Siswa dan Kelas ke LocalStorage & Sinkronkan ke Server
+  const handleSaveStudentsAndClasses = async () => {
+    setIsSavingAll(true);
+    try {
+      localStorage.setItem('educbt_students', JSON.stringify(students));
+      localStorage.setItem('educbt_classes', JSON.stringify(activeClasses));
+
+      await apiService.syncTeacherToServer({
+        students,
+        classes: activeClasses,
+        schoolProfile,
+      });
+
+      onTriggerBackup();
+      showToast(`✅ Data Tersimpan: ${students.length} Siswa & ${activeClasses.length} Rombel Kelas berhasil disinkronkan!`);
+    } catch (err: any) {
+      console.warn('Sync server warning:', err);
+      // Still saved locally
+      localStorage.setItem('educbt_students', JSON.stringify(students));
+      localStorage.setItem('educbt_classes', JSON.stringify(activeClasses));
+      showToast(`✅ Data ${students.length} Siswa & ${activeClasses.length} Kelas tersimpan di browser.`);
+    } finally {
+      setIsSavingAll(false);
+    }
+  };
 
   // Filtered students
   const filteredStudents = students.filter((s) => {
@@ -108,13 +162,59 @@ export const SchoolAndStudentsTab: React.FC<SchoolAndStudentsTabProps> = ({
     e.preventDefault();
     const trimmed = newClassName.trim().toUpperCase();
     if (!trimmed) return;
-    if (classes.includes(trimmed)) {
-      alert(`Kelas ${trimmed} sudah ada.`);
+    if (activeClasses.includes(trimmed)) {
+      showToast(`Kelas ${trimmed} sudah terdaftar.`);
+      setSelectedClass(trimmed);
       return;
     }
+    const updated = Array.from(new Set([...activeClasses, trimmed])).sort();
+    if (onUpdateClasses) onUpdateClasses(updated);
     setSelectedClass(trimmed);
     setNewClassName('');
-    alert(`Kelas ${trimmed} berhasil ditambahkan! Silakan tambahkan siswa ke kelas ini.`);
+    showToast(`Kelas ${trimmed} berhasil ditambahkan!`);
+    onTriggerBackup();
+  };
+
+  const handleRenameClass = (oldName: string, newName: string) => {
+    const trimmedNew = newName.trim().toUpperCase();
+    if (!trimmedNew || trimmedNew === oldName) {
+      setRenamingClass(null);
+      return;
+    }
+    // Update student references
+    const updatedStudents = students.map((s) =>
+      s.classRoom === oldName ? { ...s, classRoom: trimmedNew } : s
+    );
+    onUpdateStudents(updatedStudents);
+
+    // Update classes list
+    const updatedClasses = activeClasses.map((c) => (c === oldName ? trimmedNew : c));
+    const uniqueClasses = Array.from(new Set(updatedClasses)).sort();
+    if (onUpdateClasses) onUpdateClasses(uniqueClasses);
+
+    if (selectedClass === oldName) setSelectedClass(trimmedNew);
+    setRenamingClass(null);
+    showToast(`Kelas ${oldName} berhasil diubah menjadi ${trimmedNew}!`);
+    onTriggerBackup();
+  };
+
+  const handleDeleteClass = (targetClass: string) => {
+    const studentCount = students.filter((s) => s.classRoom === targetClass).length;
+    if (studentCount > 0) {
+      const confirmDelete = confirm(
+        `Kelas ${targetClass} masih memiliki ${studentCount} siswa. Hapus kelas ini dan pindahkan siswa ke kelas 'Umum'?`
+      );
+      if (!confirmDelete) return;
+      const updatedStudents = students.map((s) =>
+        s.classRoom === targetClass ? { ...s, classRoom: 'Umum' } : s
+      );
+      onUpdateStudents(updatedStudents);
+    }
+    const updatedClasses = activeClasses.filter((c) => c !== targetClass);
+    if (onUpdateClasses) onUpdateClasses(updatedClasses);
+    if (selectedClass === targetClass) setSelectedClass('all');
+    showToast(`Kelas ${targetClass} berhasil dihapus.`);
+    onTriggerBackup();
   };
 
   const handleDeleteStudent = (id: string) => {
@@ -528,66 +628,148 @@ export const SchoolAndStudentsTab: React.FC<SchoolAndStudentsTabProps> = ({
 
       {/* 2. Class & Roster Overview */}
       <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-xs space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-purple-50 border border-purple-200 flex items-center justify-center text-purple-600">
               <Layers className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-base font-bold text-slate-900">Menu Simpan Data Kelas &amp; Rombel</h2>
+              <h2 className="text-base font-bold text-slate-900">Kelola Data Siswa &amp; Kelas</h2>
               <p className="text-xs text-slate-500">
-                Kelompokkan siswa berdasarkan rombongan belajar untuk distribusi ujian dan pelaporan nilai klasikal
+                Kelompokkan siswa berdasarkan rombongan belajar untuk pengerjaan ujian dan rekap nilai otomatis
               </p>
             </div>
           </div>
 
-          {/* Quick Add Class Form */}
-          <form onSubmit={handleAddClass} className="flex items-center gap-2">
-            <input
-              type="text"
-              value={newClassName}
-              onChange={(e) => setNewClassName(e.target.value)}
-              placeholder="Tambah Kelas Baru (cth: IX-C)..."
-              className="px-3 py-1.5 text-xs rounded-xl border border-slate-300 focus:ring-2 focus:ring-purple-500"
-            />
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Quick Add Class Form */}
+            <form onSubmit={handleAddClass} className="flex items-center gap-1.5">
+              <input
+                type="text"
+                value={newClassName}
+                onChange={(e) => setNewClassName(e.target.value)}
+                placeholder="Tambah Kelas (cth: IX-D)..."
+                className="px-3 py-2 text-xs rounded-xl border border-slate-300 focus:ring-2 focus:ring-purple-500 uppercase"
+              />
+              <button
+                type="submit"
+                className="px-3 py-2 text-xs font-semibold rounded-xl bg-purple-600 hover:bg-purple-700 text-white flex items-center gap-1 shadow-2xs transition shrink-0"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Tambah Kelas</span>
+              </button>
+            </form>
+
+            {/* Tombol Simpan Data Siswa dan Kelas */}
             <button
-              type="submit"
-              className="px-3 py-1.5 text-xs font-semibold rounded-xl bg-purple-600 hover:bg-purple-700 text-white flex items-center gap-1 shadow-2xs transition"
+              type="button"
+              id="btn-save-students-classes"
+              onClick={handleSaveStudentsAndClasses}
+              disabled={isSavingAll}
+              className="px-4 py-2 text-xs font-bold rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white flex items-center gap-1.5 shadow-sm transition disabled:opacity-50"
+              title="Simpan perubahan data siswa dan daftar kelas ke browser & server terpusat"
             >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Tambah Kelas</span>
+              <Save className="w-3.5 h-3.5" />
+              <span>{isSavingAll ? 'Menyimpan...' : 'Simpan Data Siswa & Kelas'}</span>
             </button>
-          </form>
+          </div>
         </div>
 
         {/* Class Cards Pill Grid */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-2 pt-1">
+        <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-2.5 pt-1">
           <div
             onClick={() => setSelectedClass('all')}
             className={`p-3 rounded-xl border cursor-pointer transition text-center ${
               selectedClass === 'all'
-                ? 'bg-purple-50 border-purple-400 text-purple-900 font-bold shadow-2xs'
+                ? 'bg-purple-50 border-purple-400 text-purple-900 font-bold shadow-2xs ring-1 ring-purple-300'
                 : 'bg-slate-50 border-slate-200 hover:bg-slate-100 text-slate-700'
             }`}
           >
-            <span className="text-[10px] text-slate-500 block">Semua Rombel</span>
-            <span className="text-sm font-bold">{students.length} Siswa</span>
+            <span className="text-[10px] text-slate-500 block uppercase font-semibold">Semua Rombel</span>
+            <span className="text-sm font-bold text-slate-900">{students.length} Siswa</span>
           </div>
-          {classes.map((cls) => {
-            const count = students.filter((s) => s.classRoom === cls).length;
+
+          {activeClasses.map((cls) => {
+            const classStudents = students.filter((s) => s.classRoom === cls);
+            const count = classStudents.length;
+            const lCount = classStudents.filter((s) => s.gender === 'L').length;
+            const pCount = classStudents.filter((s) => s.gender === 'P').length;
             const isSelected = selectedClass === cls;
+
+            if (renamingClass === cls) {
+              return (
+                <div key={cls} className="p-2.5 rounded-xl border border-indigo-300 bg-indigo-50/50 space-y-1.5">
+                  <input
+                    type="text"
+                    autoFocus
+                    value={renamedValue}
+                    onChange={(e) => setRenamedValue(e.target.value.toUpperCase())}
+                    className="w-full text-xs font-bold p-1 rounded border border-indigo-400 bg-white"
+                  />
+                  <div className="flex items-center gap-1 justify-end">
+                    <button
+                      type="button"
+                      onClick={() => handleRenameClass(cls, renamedValue)}
+                      className="text-[10px] px-2 py-0.5 bg-indigo-600 text-white font-bold rounded"
+                    >
+                      Simpan
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setRenamingClass(null)}
+                      className="text-[10px] px-1.5 py-0.5 text-slate-500 hover:bg-slate-200 rounded"
+                    >
+                      Batal
+                    </button>
+                  </div>
+                </div>
+              );
+            }
+
             return (
               <div
                 key={cls}
                 onClick={() => setSelectedClass(cls)}
-                className={`p-3 rounded-xl border cursor-pointer transition text-center ${
+                className={`p-2.5 rounded-xl border cursor-pointer transition relative group ${
                   isSelected
-                    ? 'bg-blue-50 border-blue-400 text-blue-900 font-bold shadow-2xs'
+                    ? 'bg-blue-50 border-blue-400 text-blue-900 font-bold shadow-2xs ring-1 ring-blue-300'
                     : 'bg-white border-slate-200 hover:bg-slate-50 text-slate-700'
                 }`}
               >
-                <span className="text-xs font-bold block">Kelas {cls}</span>
-                <span className="text-[11px] text-slate-500">{count} Peserta</span>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold block truncate">Kelas {cls}</span>
+                  <div className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 transition">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setRenamingClass(cls);
+                        setRenamedValue(cls);
+                      }}
+                      className="p-0.5 text-slate-400 hover:text-indigo-600 rounded"
+                      title="Ubah Nama Kelas"
+                    >
+                      <Edit className="w-3 h-3" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteClass(cls);
+                      }}
+                      className="p-0.5 text-slate-400 hover:text-rose-600 rounded"
+                      title="Hapus Kelas"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  </div>
+                </div>
+                <div className="flex items-center justify-between text-[11px] text-slate-500 mt-1">
+                  <span>{count} Peserta</span>
+                  <span className="text-[10px] font-mono text-slate-400">
+                    L:{lCount} P:{pCount}
+                  </span>
+                </div>
               </div>
             );
           })}
@@ -611,6 +793,19 @@ export const SchoolAndStudentsTab: React.FC<SchoolAndStudentsTabProps> = ({
 
           {/* Action toolbar */}
           <div className="flex flex-wrap items-center gap-2">
+            {/* Tombol Simpan Data Siswa dan Kelas */}
+            <button
+              type="button"
+              id="btn-save-students-classes-toolbar"
+              onClick={handleSaveStudentsAndClasses}
+              disabled={isSavingAll}
+              className="px-3.5 py-2 text-xs font-bold rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white flex items-center gap-1.5 transition shadow-2xs disabled:opacity-50"
+              title="Simpan data siswa dan kelas sekarang"
+            >
+              <Save className="w-3.5 h-3.5" />
+              <span>{isSavingAll ? 'Menyimpan...' : 'Simpan Data Siswa'}</span>
+            </button>
+
             {/* Draft Siswa Button */}
             <button
               id="btn-open-student-drafts"
@@ -641,7 +836,7 @@ export const SchoolAndStudentsTab: React.FC<SchoolAndStudentsTabProps> = ({
                   nisn: '',
                   name: '',
                   gender: 'L',
-                  classRoom: classes[0] || 'IX-A',
+                  classRoom: selectedClass !== 'all' ? selectedClass : activeClasses[0] || 'IX-A',
                   parentPhone: '',
                   parentEmail: '',
                 });
@@ -697,7 +892,7 @@ export const SchoolAndStudentsTab: React.FC<SchoolAndStudentsTabProps> = ({
               className="px-3 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-indigo-500 bg-white"
             >
               <option value="all">Semua Kelas ({students.length})</option>
-              {classes.map((c) => (
+              {activeClasses.map((c) => (
                 <option key={c} value={c}>
                   Kelas {c} ({students.filter((s) => s.classRoom === c).length})
                 </option>
@@ -803,6 +998,7 @@ export const SchoolAndStudentsTab: React.FC<SchoolAndStudentsTabProps> = ({
       {isStudentModalOpen && editingStudent && (
         <StudentModal
           student={editingStudent}
+          availableClasses={activeClasses}
           onSave={handleSaveStudent}
           onClose={() => {
             setIsStudentModalOpen(false);
@@ -816,7 +1012,7 @@ export const SchoolAndStudentsTab: React.FC<SchoolAndStudentsTabProps> = ({
         isOpen={isDraftModalOpen}
         onClose={() => setIsDraftModalOpen(false)}
         students={students}
-        classes={classes}
+        classes={activeClasses}
         onLoadDraft={handleLoadDraftStudent}
         onNotification={(msg) => {
           setToastNotification(msg);
@@ -842,11 +1038,17 @@ export const SchoolAndStudentsTab: React.FC<SchoolAndStudentsTabProps> = ({
 // Student Edit Modal
 interface StudentModalProps {
   student: Student;
+  availableClasses?: string[];
   onSave: (s: Student) => void;
   onClose: () => void;
 }
 
-const StudentModal: React.FC<StudentModalProps> = ({ student, onSave, onClose }) => {
+const StudentModal: React.FC<StudentModalProps> = ({
+  student,
+  availableClasses = [],
+  onSave,
+  onClose,
+}) => {
   const [form, setForm] = useState<Student>({ ...student });
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -906,14 +1108,40 @@ const StudentModal: React.FC<StudentModalProps> = ({ student, onSave, onClose })
 
             <div>
               <label className="block font-semibold text-slate-700 mb-1">Kelas / Rombel</label>
-              <input
-                type="text"
-                required
-                value={form.classRoom}
-                onChange={(e) => setForm({ ...form, classRoom: e.target.value })}
-                className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-indigo-500"
-                placeholder="Contoh: IX-A"
-              />
+              <div className="space-y-1">
+                <input
+                  type="text"
+                  required
+                  list="registered-classes-list"
+                  value={form.classRoom}
+                  onChange={(e) => setForm({ ...form, classRoom: e.target.value.toUpperCase() })}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-indigo-500 uppercase"
+                  placeholder="Contoh: IX-A"
+                />
+                <datalist id="registered-classes-list">
+                  {availableClasses.map((cls) => (
+                    <option key={cls} value={cls} />
+                  ))}
+                </datalist>
+                {availableClasses.length > 0 && (
+                  <div className="flex flex-wrap gap-1 pt-1">
+                    {availableClasses.slice(0, 5).map((cls) => (
+                      <button
+                        key={cls}
+                        type="button"
+                        onClick={() => setForm({ ...form, classRoom: cls })}
+                        className={`px-1.5 py-0.5 rounded text-[10px] font-semibold border transition ${
+                          form.classRoom === cls
+                            ? 'bg-indigo-600 text-white border-indigo-600'
+                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200 border-slate-200'
+                        }`}
+                      >
+                        {cls}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 

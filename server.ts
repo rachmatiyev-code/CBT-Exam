@@ -16,6 +16,19 @@ const PORT = 3000;
 
 app.use(express.json({ limit: '10mb' }));
 
+// Global API Request Logger
+app.use((req, _res, next) => {
+  if (req.path.startsWith('/api')) {
+    console.log(`[Server API ${new Date().toLocaleTimeString('id-ID')}] ${req.method} ${req.path}`);
+  }
+  next();
+});
+
+// Health Check API
+app.get('/api/health', (_req, res) => {
+  res.json({ status: 'ok', time: new Date().toISOString() });
+});
+
 // =========================================================================
 // CENTRALIZED SERVER-SIDE DATABASE (Multi-Device Sync for CBT)
 // =========================================================================
@@ -45,6 +58,7 @@ interface ServerCBTState {
   exam: any | null;
   schoolProfile: any | null;
   students: any[] | null;
+  classes?: string[];
   packages: any[] | null;
   sessions: any[];
   questionDrafts?: any[];
@@ -385,6 +399,15 @@ app.post('/api/validate-key', handleValidateKey);
 app.post('/api/gemini/validate', handleValidateKey);
 app.post('/api/gemini/validate-key', handleValidateKey);
 
+// GET status for /api/generate-questions
+app.get('/api/generate-questions', (_req, res) => {
+  res.json({
+    success: true,
+    status: 'ok',
+    message: 'Endpoint /api/generate-questions aktif. Gunakan metode POST dengan parameter { subject, grade, coreMaterial, ... } untuk membuat soal dengan AI.',
+  });
+});
+
 // 2. Generate questions with Gemini AI
 app.post('/api/generate-questions', async (req, res) => {
   try {
@@ -709,9 +732,17 @@ Berikan analisis pedagogis menyeluruh dalam format JSON murni:
 });
 
 // 6. Proxy sync to Google Apps Script Web App (if teacher configures a GAS Web App URL)
+app.get('/api/sync-gas', (_req, res) => {
+  res.json({
+    success: true,
+    status: 'ok',
+    message: 'Endpoint /api/sync-gas aktif dan siap menerima data sinkronisasi Google Apps Script via POST.',
+  });
+});
+
 app.post('/api/sync-gas', async (req, res) => {
   try {
-    const { webAppUrl, action, payload } = req.body;
+    let { webAppUrl, action, payload } = req.body;
     if (!webAppUrl) {
       return res.json({
         success: true,
@@ -721,11 +752,39 @@ app.post('/api/sync-gas', async (req, res) => {
       });
     }
 
+    webAppUrl = String(webAppUrl).trim();
+
+    // Deteksi jika pengguna salah memasukkan URL editor script atau URL test
+    if (webAppUrl.includes('/edit')) {
+      return res.json({
+        success: false,
+        error: 'URL yang dimasukkan adalah URL Editor Apps Script (.../edit), bukan Web App URL. Di Google Apps Script, klik tombol "Deploy" > "New deployment" > pilih jenis "Web app", lalu salin URL yang berakhiran /exec.',
+      });
+    }
+
+    if (webAppUrl.endsWith('/dev')) {
+      return res.json({
+        success: false,
+        error: 'URL yang dimasukkan adalah URL Test Deployment (.../dev). URL ini hanya bisa diakses saat login di tab browser yang sama. Gunakan Web App URL dari menu "New deployment" yang berakhiran /exec.',
+      });
+    }
+
+    console.log(`[GAS Sync] Forwarding action="${action}" to ${webAppUrl.slice(0, 50)}...`);
+
     const fetchResponse = await fetch(webAppUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action, payload }),
+      redirect: 'follow',
     });
+
+    if (fetchResponse.status === 404) {
+      return res.json({
+        success: false,
+        isGas404: true,
+        error: 'Google Apps Script Web App Anda mengembalikan status 404 (Not Found).\n\nLangkah perbaikan di Google Apps Script:\n1. Buka Apps Script, klik tombol "Deploy" di kanan atas > "Manage deployments".\n2. Klik ikon Pensil (Edit), pada dropdown Version pilih "New version" (Versi Baru).\n3. Pada opsi "Who has access", WAJIB disetel ke "Anyone" (Siapa saja), BUKAN "Only myself" atau dibatasi domain.\n4. Klik "Deploy" dan salin Web App URL yang berakhiran "/exec".',
+      });
+    }
 
     const rawText = await fetchResponse.text();
     let data: any = null;
@@ -734,11 +793,17 @@ app.post('/api/sync-gas', async (req, res) => {
     } catch {
       return res.json({
         success: false,
-        error: 'Google Apps Script mengembalikan respon non-JSON. Pastikan izin akses Web App disetel ke "Anyone" (Siapa saja).',
-        preview: rawText.slice(0, 150),
+        error: 'Google Apps Script mengembalikan respon non-JSON (Status: ' + fetchResponse.status + '). Pastikan opsi "Who has access" disetel ke "Anyone" (Siapa saja) dan Anda telah menyelesaikan Authorize Permissions.',
+        preview: rawText.slice(0, 200),
       });
     }
-    res.json({ success: true, mode: 'live_gas', data });
+
+    res.json({
+      success: true,
+      mode: 'live_gas',
+      data,
+      message: data.message || 'Koneksi ke Google Apps Script aktif dan terverifikasi!',
+    });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message || 'Gagal menyinkronkan ke Google Apps Script' });
   }
@@ -765,11 +830,12 @@ app.get('/api/cbt/state', (_req, res) => {
 // B. Teacher updates active exam, school profile, student roster, or package history
 app.post('/api/cbt/sync-teacher', (req, res) => {
   try {
-    const { exam, schoolProfile, students, packages } = req.body;
+    const { exam, schoolProfile, students, classes, packages } = req.body;
     const updatePayload: Partial<ServerCBTState> = {};
     if (exam !== undefined) updatePayload.exam = exam;
     if (schoolProfile !== undefined) updatePayload.schoolProfile = schoolProfile;
     if (students !== undefined) updatePayload.students = students;
+    if (classes !== undefined) updatePayload.classes = classes;
     if (packages !== undefined) updatePayload.packages = packages;
 
     const updated = writeServerDB(updatePayload);
@@ -791,6 +857,7 @@ app.get('/api/cbt/active-exam', (_req, res) => {
       success: true,
       exam: db.exam,
       students: db.students || [],
+      classes: db.classes || [],
       schoolProfile: db.schoolProfile,
     });
   } catch (e: any) {

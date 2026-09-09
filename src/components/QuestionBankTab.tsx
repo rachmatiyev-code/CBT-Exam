@@ -33,6 +33,8 @@ import { excelService } from '../services/gasSync';
 import { apiService } from '../services/api';
 import { QuestionDraftModal } from './QuestionDraftModal';
 import { QuestionTemplateModal } from './QuestionTemplateModal';
+import { TokenModal, generateRandomToken } from './TokenModal';
+import { Dices } from 'lucide-react';
 
 interface QuestionBankTabProps {
   exam: Exam;
@@ -69,8 +71,30 @@ export const QuestionBankTab: React.FC<QuestionBankTabProps> = ({
   const [isSaveModalOpen, setIsSaveModalOpen] = useState(false);
   const [isDraftModalOpen, setIsDraftModalOpen] = useState(false);
   const [isTemplateModalOpen, setIsTemplateModalOpen] = useState(false);
+  const [isTokenModalOpen, setIsTokenModalOpen] = useState(false);
   const [copiedNotification, setCopiedNotification] = useState<string | null>(null);
   const [historySearch, setHistorySearch] = useState('');
+
+  const handleRandomizeToken = (prefix?: string) => {
+    const newToken = generateRandomToken(prefix, 5);
+    onUpdateExam({
+      ...exam,
+      token: newToken,
+    });
+    setSaveFormData((prev) => ({ ...prev, token: newToken }));
+    handleCopyText(newToken, `Token Diacak: ${newToken}`);
+    onTriggerBackup();
+  };
+
+  const handleUpdateToken = (newToken: string) => {
+    onUpdateExam({
+      ...exam,
+      token: newToken,
+    });
+    setSaveFormData((prev) => ({ ...prev, token: newToken }));
+    handleCopyText(newToken, `Token Diperbarui: ${newToken}`);
+    onTriggerBackup();
+  };
 
   const handleLoadDraftQuestion = (draft: QuestionDraft) => {
     onUpdateExam({
@@ -268,27 +292,61 @@ export const QuestionBankTab: React.FC<QuestionBankTabProps> = ({
           </p>
 
           <div className="flex flex-wrap items-center gap-2 pt-1 text-xs">
+            {/* Token Badge & Copy */}
+            <div className="flex items-center rounded-lg border border-slate-200 bg-slate-50 p-0.5">
+              <span className="px-2 py-1 text-[11px] font-semibold text-slate-500 uppercase tracking-wide">
+                Token:
+              </span>
+              <span className="px-2 py-1 font-mono font-bold text-indigo-700 bg-white rounded-md border border-slate-200 shadow-2xs">
+                {exam.token}
+              </span>
+              <button
+                type="button"
+                onClick={() => handleCopyText(exam.token, 'Token Siswa Disalin!')}
+                className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-slate-200/60 rounded-md transition ml-0.5"
+                title="Salin Token Siswa"
+              >
+                <Copy className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            {/* Tombol Buat / Atur Token */}
             <button
-              onClick={() => handleCopyText(exam.token, 'Token Siswa Disalin!')}
-              className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold flex items-center gap-1.5 transition"
-              title="Salin Token Siswa"
+              type="button"
+              id="btn-manage-token"
+              onClick={() => setIsTokenModalOpen(true)}
+              className="px-2.5 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-semibold flex items-center gap-1.5 transition border border-indigo-200/70"
+              title="Atur atau Buat Token Ujian Baru"
             >
-              <Copy className="w-3.5 h-3.5 text-slate-500" />
-              <span>Salin Token ({exam.token})</span>
+              <KeyRound className="w-3.5 h-3.5 text-indigo-600" />
+              <span>Buat Token</span>
+            </button>
+
+            {/* Tombol Acak Token */}
+            <button
+              type="button"
+              id="btn-random-token"
+              onClick={() => handleRandomizeToken()}
+              className="px-2.5 py-1.5 rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-700 font-semibold flex items-center gap-1.5 transition border border-purple-200/70"
+              title="Acak Token Otomatis Sekarang"
+            >
+              <Dices className="w-3.5 h-3.5 text-purple-600" />
+              <span>🎲 Acak Token</span>
             </button>
 
             <button
+              type="button"
               onClick={() =>
                 handleCopyText(
                   `${window.location.origin}${window.location.pathname}?mode=siswa&token=${exam.token}`,
                   'Tautan Langsung Siswa Disalin!'
                 )
               }
-              className="px-2.5 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold flex items-center gap-1.5 transition"
+              className="px-2.5 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold flex items-center gap-1.5 transition border border-blue-200/70"
               title="Salin Tautan Pengerjaan Siswa"
             >
               <Share2 className="w-3.5 h-3.5 text-blue-600" />
-              <span>Salin Tautan Pengerjaan Siswa</span>
+              <span>Salin Tautan Siswa</span>
             </button>
           </div>
         </div>
@@ -713,6 +771,14 @@ export const QuestionBankTab: React.FC<QuestionBankTabProps> = ({
           onClose={() => setIsSaveModalOpen(false)}
         />
       )}
+
+      {/* Token Management Modal */}
+      <TokenModal
+        isOpen={isTokenModalOpen}
+        onClose={() => setIsTokenModalOpen(false)}
+        exam={exam}
+        onUpdateToken={handleUpdateToken}
+      />
 
       {/* Question Draft Modal */}
       <QuestionDraftModal
@@ -1379,9 +1445,24 @@ const SavePackageModal: React.FC<SavePackageModalProps> = ({
             </div>
 
             <div>
-              <label className="block font-semibold text-slate-700 mb-1">
-                Token Siswa <span className="text-rose-500">*</span>
-              </label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="font-semibold text-slate-700">
+                  Token Siswa <span className="text-rose-500">*</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() =>
+                    onChangeForm({
+                      ...formData,
+                      token: generateRandomToken('', 5),
+                    })
+                  }
+                  className="text-[10px] text-purple-700 hover:text-purple-900 font-bold flex items-center gap-1 hover:underline"
+                >
+                  <Dices className="w-3 h-3" />
+                  <span>🎲 Acak</span>
+                </button>
+              </div>
               <input
                 type="text"
                 required

@@ -174,14 +174,20 @@ export const GoogleIntegrationModal: React.FC<GoogleIntegrationModalProps> = ({
               </pre>
             </div>
 
-            <div className="text-[11px] text-slate-600 space-y-1 bg-amber-50/70 p-3 rounded-lg border border-amber-200/80">
-              <p className="font-semibold text-amber-900">Cara Penggunaan Cepat:</p>
-              <ol className="list-decimal list-inside space-y-0.5 text-amber-800">
+            <div className="text-[11px] text-slate-600 space-y-1.5 bg-amber-50/70 p-3 rounded-lg border border-amber-200/80">
+              <p className="font-semibold text-amber-900">Panduan Pemasangan &amp; Solusi Menghindari Error 404:</p>
+              <ol className="list-decimal list-inside space-y-1 text-amber-800">
                 <li>Buka Google Spreadsheet baru Anda di Google Drive.</li>
                 <li>Klik menu <strong>Extensions (Ekstensi) &gt; Apps Script</strong>.</li>
-                <li>Hapus kode bawaan dan tempel kode script yang telah Anda salin di atas.</li>
-                <li>Klik <strong>Deploy &gt; New Deployment &gt; Web App</strong>, pilih <em>Execute as: Me</em> &amp; <em>Who has access: Anyone</em>.</li>
-                <li>Salin Web App URL dan masukkan pada kolom di bawah ini.</li>
+                <li>Hapus kode bawaan dan tempel kode script yang telah Anda salin di atas, lalu klik ikon <strong>Save (Disket)</strong>.</li>
+                <li>Klik <strong>Deploy &gt; New Deployment</strong> (ikon roda gigi pilih <strong>Web app</strong>).</li>
+                <li>
+                  <strong className="text-rose-700">Wajib:</strong> Setel <em>Execute as: Me</em> &amp; <em>Who has access: <strong>Anyone (Siapa saja)</strong></em> agar webhook tidak diblokir (404/403).
+                </li>
+                <li>Selesaikan izin akses (Review permissions &gt; Advanced &gt; Go to ... (unsafe) &gt; Allow).</li>
+                <li>
+                  Salin <strong>Web App URL</strong> yang berakhiran <code className="bg-amber-200/70 px-1 py-0.5 rounded font-mono font-bold text-amber-900">/exec</code> (jangan salin dari address bar yang berakhiran /edit atau /dev).
+                </li>
               </ol>
             </div>
           </div>
@@ -189,7 +195,7 @@ export const GoogleIntegrationModal: React.FC<GoogleIntegrationModalProps> = ({
           {/* Web App URL Config */}
           <div className="space-y-3">
             <label className="block font-semibold text-slate-700">
-              Google Apps Script Web App URL (Opsional / Siap Pakai)
+              Google Apps Script Web App URL (Wajib berakhiran /exec)
             </label>
             <div className="flex gap-2">
               <input
@@ -197,7 +203,7 @@ export const GoogleIntegrationModal: React.FC<GoogleIntegrationModalProps> = ({
                 type="url"
                 value={webAppUrl}
                 onChange={(e) => setWebAppUrl(e.target.value)}
-                placeholder="https://script.google.com/macros/s/.../exec"
+                placeholder="https://script.google.com/macros/s/AKfycb.../exec"
                 className="flex-1 text-xs font-mono px-3 py-2 rounded-xl border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-emerald-500"
               />
               <button
@@ -213,13 +219,17 @@ export const GoogleIntegrationModal: React.FC<GoogleIntegrationModalProps> = ({
 
             {testResult && (
               <div
-                className={`p-2.5 rounded-lg border text-xs flex items-center gap-2 ${
+                className={`p-3 rounded-lg border text-xs flex items-start gap-2.5 leading-relaxed whitespace-pre-line ${
                   testResult.success
                     ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
                     : 'bg-rose-50 text-rose-800 border-rose-200'
                 }`}
               >
-                {testResult.success ? <Check className="w-4 h-4 text-emerald-600" /> : <AlertCircle className="w-4 h-4 text-rose-600" />}
+                {testResult.success ? (
+                  <Check className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                ) : (
+                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                )}
                 <span>{testResult.message}</span>
               </div>
             )}

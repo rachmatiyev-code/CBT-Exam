@@ -16,9 +16,13 @@ import {
   Check,
   BrainCircuit,
   Lock,
+  User,
+  Users,
+  UserCheck,
 } from 'lucide-react';
 import { Exam, Question, Student, StudentAnswer, StudentExamSession } from '../types';
 import { apiService } from '../services/api';
+import { StudentSelectModal } from './StudentSelectModal';
 
 interface StudentExamViewProps {
   exam: Exam;
@@ -42,6 +46,7 @@ export const StudentExamView: React.FC<StudentExamViewProps> = ({
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(
     initialStudents[0] || null
   );
+  const [isStudentPickerOpen, setIsStudentPickerOpen] = useState(false);
   const [enteredToken, setEnteredToken] = useState(initialExam.token);
   const [tokenError, setTokenError] = useState<string | null>(null);
 
@@ -458,21 +463,81 @@ export const StudentExamView: React.FC<StudentExamViewProps> = ({
               <label className="block font-semibold text-slate-300 mb-1.5">
                 Pilih Identitas Siswa Peserta Ujian
               </label>
-              <select
-                value={selectedStudent?.id || ''}
-                onChange={(e) => {
-                  const s = students.find((item) => item.id === e.target.value);
-                  setSelectedStudent(s || null);
-                }}
-                className="w-full text-xs p-3 rounded-xl bg-slate-900 border border-slate-700 text-slate-100 focus:ring-2 focus:ring-indigo-500"
-              >
-                {students.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name} (NISN: {s.nisn} - Kelas {s.classRoom})
-                  </option>
-                ))}
-              </select>
+
+              {/* Tombol Pilih Siswa & Kartu Identitas Siswa */}
+              {selectedStudent ? (
+                <div className="p-3.5 rounded-2xl bg-slate-900 border border-indigo-500/40 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-10 h-10 rounded-xl bg-indigo-600 text-white font-bold text-sm flex items-center justify-center shrink-0 shadow-xs">
+                        {selectedStudent.name.slice(0, 2).toUpperCase()}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xs font-bold text-white truncate">
+                            {selectedStudent.name}
+                          </span>
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-900/60 border border-indigo-600/50 text-indigo-300 font-semibold shrink-0">
+                            {selectedStudent.classRoom}
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-slate-400 mt-0.5">
+                          <span>NISN: <strong className="text-slate-200 font-mono">{selectedStudent.nisn}</strong></span>
+                          <span className="mx-1.5">•</span>
+                          <span>{selectedStudent.gender === 'L' ? 'Laki-laki' : 'Perempuan'}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    id="btn-select-student-modal"
+                    onClick={() => setIsStudentPickerOpen(true)}
+                    className="w-full py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-750 border border-slate-700 text-indigo-300 text-xs font-semibold flex items-center justify-center gap-2 transition"
+                  >
+                    <UserCheck className="w-3.5 h-3.5 text-indigo-400" />
+                    <span>Ganti / Pilih Siswa Lain</span>
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  id="btn-select-student-modal"
+                  onClick={() => setIsStudentPickerOpen(true)}
+                  className="w-full p-4 rounded-2xl bg-slate-900 border-2 border-dashed border-indigo-500/50 hover:border-indigo-400 text-left transition flex items-center justify-between group"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-indigo-600/20 text-indigo-400 flex items-center justify-center group-hover:scale-105 transition">
+                      <Users className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <span className="text-xs font-bold text-white block">
+                        Klik Di Sini untuk Memilih Siswa
+                      </span>
+                      <span className="text-[11px] text-slate-400">
+                        Pilih nama Anda dari daftar peserta rombel
+                      </span>
+                    </div>
+                  </div>
+                  <span className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-bold shadow-xs">
+                    Pilih Siswa
+                  </span>
+                </button>
+              )}
             </div>
+
+            {/* Modal Pilih Siswa */}
+            <StudentSelectModal
+              isOpen={isStudentPickerOpen}
+              onClose={() => setIsStudentPickerOpen(false)}
+              students={students}
+              selectedStudentId={selectedStudent?.id}
+              onSelectStudent={(student) => {
+                setSelectedStudent(student);
+                setTokenError(null);
+              }}
+            />
 
             <div>
               <label className="block font-semibold text-slate-300 mb-1.5 flex items-center gap-1">
