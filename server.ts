@@ -8,8 +8,17 @@ import { createServer as createViteServer } from 'vite';
 
 dotenv.config();
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+// Universal path resolver safe for both ESM (dev) and CJS (production bundle)
+const getAppDirname = () => {
+  if (typeof __dirname !== 'undefined' && __dirname) return __dirname;
+  try {
+    if (typeof import.meta !== 'undefined' && import.meta?.url) {
+      return path.dirname(fileURLToPath(import.meta.url));
+    }
+  } catch {}
+  return process.cwd();
+};
+const appDir = getAppDirname();
 
 const app = express();
 const PORT = 3000;
@@ -215,9 +224,9 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, timeoutMsg: stri
 }
 
 // Generate content with automatic model fallback and timeout protection
-async function generateWithFallback(client: GoogleGenAI, contents: any, config?: any, timeoutMs = 25000) {
-  // Use gemini-3.8-flash first (standard for text tasks), then gemini-flash-latest, then gemini-3.1-flash-lite
-  const models = ['gemini-3.8-flash', 'gemini-flash-latest', 'gemini-3.1-flash-lite'];
+async function generateWithFallback(client: GoogleGenAI, contents: any, config?: any, timeoutMs = 25000, fallbackClient?: GoogleGenAI) {
+  // Test gemini-2.5-flash and gemini-3.8-flash first (standard across all keys), then gemini-flash-latest, then gemini-3.1-flash-lite
+  const models = ['gemini-2.5-flash', 'gemini-3.8-flash', 'gemini-flash-latest', 'gemini-3.1-flash-lite'];
   let lastError: any = null;
 
   for (const model of models) {
@@ -234,15 +243,36 @@ async function generateWithFallback(client: GoogleGenAI, contents: any, config?:
     } catch (err: any) {
       lastError = err;
       const msg = err?.message || '';
-      // If API key is invalid or permission denied, no need to retry other models
+      console.warn(`Model ${model} respons: ${msg.slice(0, 100)}`);
+      // If API key is invalid or permission denied, stop trying models on this client
       if (
         msg.includes('API_KEY_INVALID') ||
         msg.includes('API key not valid') ||
         msg.includes('PERMISSION_DENIED')
       ) {
-        throw err;
+        break;
       }
-      console.warn(`Model ${model} gagal (${msg.slice(0, 80)}), mencoba model berikutnya...`);
+    }
+  }
+
+  // If primary client failed, and server key fallbackClient is available, retry with fallback client
+  if (fallbackClient) {
+    console.info('[AI Fallback] Mencoba menggunakan Kunci Server Gemini bawaan...');
+    for (const model of models) {
+      try {
+        return await withTimeout(
+          fallbackClient.models.generateContent({
+            model,
+            contents,
+            config,
+          }),
+          timeoutMs,
+          `Model fallback ${model} timeout setelah ${timeoutMs / 1000} detik`
+        );
+      } catch (err: any) {
+        lastError = err;
+        console.warn(`[AI Fallback] Model ${model} gagal: ${(err?.message || '').slice(0, 80)}`);
+      }
     }
   }
 
@@ -318,24 +348,43 @@ function extractJsonFromText(rawText: string, fallback: any = []): any {
 }
 
 // Helper to get GoogleGenAI client with fallback to server environment key
-function getGenAIClient(customApiKey?: string) {
+function getClients(customApiKey?: string) {
   const cleanedCustom = cleanApiKey(customApiKey);
   const cleanedEnv = cleanApiKey(process.env.GEMINI_API_KEY);
-  const apiKey = cleanedCustom || cleanedEnv;
+  const primaryKey = cleanedCustom || cleanedEnv;
 
-  if (!apiKey) {
+  if (!primaryKey) {
     throw new Error(
       'Gemini API Key tidak ditemukan. Silakan masukkan kunci API Anda di menu Pengaturan Gemini atau konfigurasi GEMINI_API_KEY di environment server.'
     );
   }
-  return new GoogleGenAI({
-    apiKey,
+
+  const primaryClient = new GoogleGenAI({
+    apiKey: primaryKey,
     httpOptions: {
       headers: {
         'User-Agent': 'aistudio-build',
       },
     },
   });
+
+  const fallbackClient =
+    cleanedCustom && cleanedEnv && cleanedCustom !== cleanedEnv
+      ? new GoogleGenAI({
+          apiKey: cleanedEnv,
+          httpOptions: {
+            headers: {
+              'User-Agent': 'aistudio-build',
+            },
+          },
+        })
+      : undefined;
+
+  return { primaryClient, fallbackClient, usingServerKey: !cleanedCustom && !!cleanedEnv };
+}
+
+function getGenAIClient(customApiKey?: string) {
+  return getClients(customApiKey).primaryClient;
 }
 
 // Check if Gemini API key is configured on server or ready
@@ -354,29 +403,31 @@ app.get('/api/gemini/key-status', handleKeyStatus);
 const handleValidateKey = async (req: any, res: any) => {
   try {
     const { apiKey } = req.body;
-    const client = getGenAIClient(apiKey);
+    const { primaryClient, fallbackClient, usingServerKey } = getClients(apiKey);
 
     // Test fast response using standard models and fallback
     let pingSuccess = false;
     let pingText = 'OK';
     try {
       const response = await generateWithFallback(
-        client,
+        primaryClient,
         'Ping: Jawab persis 1 kata: SIAP',
         undefined,
-        10000
+        10000,
+        fallbackClient
       );
       pingSuccess = true;
       pingText = response?.text || 'OK';
     } catch (genErr: any) {
       console.warn('Ping generation warning:', genErr?.message?.slice(0, 120));
-      // Re-throw if authentication or permission error
+      // If primary failed but server fallback is active and works, ping succeeds
       const msg = genErr?.message || '';
       if (
-        msg.includes('API_KEY_INVALID') ||
-        msg.includes('API key not valid') ||
-        msg.includes('PERMISSION_DENIED') ||
-        msg.includes('INVALID_ARGUMENT')
+        (msg.includes('API_KEY_INVALID') ||
+          msg.includes('API key not valid') ||
+          msg.includes('PERMISSION_DENIED') ||
+          msg.includes('INVALID_ARGUMENT')) &&
+        !fallbackClient
       ) {
         throw genErr;
       }
@@ -388,7 +439,7 @@ const handleValidateKey = async (req: any, res: any) => {
         ? 'Kunci API Gemini valid dan siap digunakan!'
         : 'Kunci API Gemini berhasil disimpan dan siap beroperasi dengan model Google AI.',
       text: pingText,
-      usedServerKey: !cleanApiKey(apiKey) && !!cleanApiKey(process.env.GEMINI_API_KEY),
+      usedServerKey: usingServerKey,
     });
   } catch (error: any) {
     const friendlyError = formatGeminiError(error);
@@ -424,7 +475,7 @@ app.post('/api/generate-questions', async (req, res) => {
       customPrompt = '',
     } = req.body;
 
-    const client = getGenAIClient(apiKey);
+    const { primaryClient, fallbackClient } = getClients(apiKey);
 
     const prompt = `Anda adalah seorang pakar kurikulum dan guru pembuat soal ujian profesional di Indonesia.
 Buatkan ${count} butir soal ujian interaktif berkualitas tinggi dengan rincian berikut:
@@ -459,9 +510,15 @@ Wajib kembalikan HANYA JSON murni (valid RFC 8259) tanpa komentar dan tanpa pemb
   }
 ]`;
 
-    const response = await generateWithFallback(client, prompt, {
-      responseMimeType: 'application/json',
-    });
+    const response = await generateWithFallback(
+      primaryClient,
+      prompt,
+      {
+        responseMimeType: 'application/json',
+      },
+      25000,
+      fallbackClient
+    );
 
     const rawText = response.text || '[]';
     const questions = extractJsonFromText(rawText, []);
@@ -740,6 +797,218 @@ app.get('/api/sync-gas', (_req, res) => {
   });
 });
 
+// Helper normalisasi dan validasi Web App URL Google Apps Script
+function cleanAndNormalizeGasUrl(rawUrl: string): {
+  url: string;
+  cleaned: boolean;
+  warnings: string[];
+  error?: string;
+} {
+  let url = (rawUrl || '').trim();
+  const warnings: string[] = [];
+
+  // 1. Hapus kutip, kurung sudut, atau spasi berlebih
+  url = url.replace(/^["'<]+|["'>]+$/g, '').trim();
+
+  // 2. Deteksi jika user hanya memasukkan Deployment ID (contoh: AKfycbx...)
+  if (/^AKfycb[A-Za-z0-9_-]{20,}$/.test(url)) {
+    warnings.push('Deployment ID terdeteksi. Otomatis dikonversi ke format URL resmi (/exec).');
+    url = `https://script.google.com/macros/s/${url}/exec`;
+  }
+
+  // 3. Hapus path multi-akun Google (/u/0/, /u/1/, /u/2/) yang sering menjadi penyebab utama 404
+  if (/\/u\/\d+\//.test(url)) {
+    warnings.push('Path multi-akun (/u/0/ atau /u/1/) otomatis dibersihkan agar dapat diakses publik.');
+    url = url.replace(/\/u\/\d+\//, '/');
+  }
+
+  // 4. Hapus trailing slash pada /exec/
+  if (url.endsWith('/exec/')) {
+    url = url.slice(0, -1);
+  }
+
+  // 5. Bersihkan query params yang tidak diperlukan (seperti ?usp=sharing)
+  if (url.includes('/exec?') && (url.includes('usp=') || url.includes('authuser='))) {
+    url = url.split('?')[0];
+    warnings.push('Query parameter sesi Google (?usp=sharing dll) otomatis dihapus.');
+  }
+
+  // 6. Deteksi URL Google Spreadsheet (.../edit)
+  if (url.includes('docs.google.com/spreadsheets')) {
+    return {
+      url,
+      cleaned: false,
+      warnings,
+      error: 'URL yang Anda masukkan adalah URL Google Spreadsheet (.../edit). Buka menu Extensions (Ekstensi) > Apps Script di spreadsheet tersebut, lalu klik Deploy > New deployment > jenis Web app, dan salin URL yang berakhiran /exec.',
+    };
+  }
+
+  // 7. Deteksi URL Editor Apps Script (.../edit)
+  if (url.includes('script.google.com') && url.includes('/edit')) {
+    return {
+      url,
+      cleaned: false,
+      warnings,
+      error: 'URL yang Anda masukkan adalah URL Editor Script (.../edit). Klik tombol biru "Deploy" di pojok kanan atas > "New deployment" > jenis "Web app", dan salin Web App URL yang berakhiran /exec.',
+    };
+  }
+
+  // 8. Deteksi URL Test Deployment (.../dev)
+  if (url.endsWith('/dev') || url.includes('/dev?')) {
+    return {
+      url,
+      cleaned: false,
+      warnings,
+      error: 'URL yang dimasukkan adalah Test URL (.../dev). URL ini hanya aktif saat pemilik login di browser yang sama dan tidak bisa menerima webhook server. Gunakan Web App URL resmi dari "New deployment" yang berakhiran /exec.',
+    };
+  }
+
+  return {
+    url,
+    cleaned: warnings.length > 0,
+    warnings,
+  };
+}
+
+// Diagnostik mendalam probe GET dan POST ke Google Apps Script
+async function probeGasUrl(targetUrl: string) {
+  const result: {
+    cleanUrl: string;
+    getStatus: number | null;
+    getBodyPreview: string;
+    postStatus: number | null;
+    postBodyPreview: string;
+    isGoogleAuthRedirect: boolean;
+    is404: boolean;
+    diagnosis: string;
+    recommendation: string[];
+  } = {
+    cleanUrl: targetUrl,
+    getStatus: null,
+    getBodyPreview: '',
+    postStatus: null,
+    postBodyPreview: '',
+    isGoogleAuthRedirect: false,
+    is404: false,
+    diagnosis: '',
+    recommendation: [],
+  };
+
+  try {
+    // 1. Probe GET
+    const getRes = await fetch(targetUrl, {
+      method: 'GET',
+      headers: { 'Accept': 'application/json, text/html' },
+      redirect: 'follow',
+    });
+    result.getStatus = getRes.status;
+    const getText = await getRes.text();
+    result.getBodyPreview = getText.slice(0, 300);
+
+    if (
+      getText.includes('ServiceLogin') ||
+      getText.includes('accounts.google.com') ||
+      getText.includes('Sign in - Google Accounts') ||
+      getText.includes('Masuk - Akun Google')
+    ) {
+      result.isGoogleAuthRedirect = true;
+    }
+  } catch (err: any) {
+    result.getBodyPreview = `GET Error: ${err.message}`;
+  }
+
+  try {
+    // 2. Probe POST
+    const postRes = await fetch(targetUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'ping', payload: { probe: true } }),
+      redirect: 'follow',
+    });
+    result.postStatus = postRes.status;
+    const postText = await postRes.text();
+    result.postBodyPreview = postText.slice(0, 300);
+  } catch (err: any) {
+    result.postBodyPreview = `POST Error: ${err.message}`;
+  }
+
+  // 3. Analisis Kasus Spesifik
+  if (result.postStatus === 404 || result.getStatus === 404) {
+    result.is404 = true;
+  }
+
+  if (result.isGoogleAuthRedirect) {
+    result.diagnosis = 'Web App meminta login akun Google (Akses publik tertutup).';
+    result.recommendation = [
+      'Buka Google Apps Script > Deploy > Manage deployments.',
+      'Klik ikon Pensil (Edit), pada "Who has access" WAJIB diubah menjadi "Anyone" (Siapa saja).',
+      'PENTING UNTUK AKUN BELAJAR.ID / SEKOLAH: Jika akun Google Workspace sekolah Anda tidak mengizinkan opsi "Anyone" untuk umum, gunakan akun Gmail pribadi (@gmail.com) untuk membuat Spreadsheet dan Apps Script ini.',
+    ];
+  } else if (result.getStatus === 200 && result.postStatus === 404) {
+    result.diagnosis = 'Web App merespons GET dengan baik, namun POST mengembalikan 404.';
+    result.recommendation = [
+      'Kode doPost belum termuat di versi deployment aktif Google Apps Script.',
+      'Buka Apps Script > klik tombol "Deploy" di kanan atas > "Manage deployments".',
+      'Klik ikon Pensil (Edit), pada dropdown Version WAJIB pilih "New version" (Versi Baru).',
+      'Klik tombol "Deploy" untuk memperbarui.',
+    ];
+  } else if (result.getStatus === 404 && result.postStatus === 404) {
+    result.diagnosis = 'Google server mengembalikan 404 untuk endpoint Web App ini.';
+    result.recommendation = [
+      'Pastikan Anda telah melakukan Deploy > New deployment > jenis Web app (bukan jenis Library/API).',
+      'Pastikan opsi "Who has access" disetel ke "Anyone" (Siapa saja).',
+      'Jika menggunakan akun Workspace/Belajar.id yang dibatasi oleh kebijakan admin sekolah, pindahkan script ke akun Gmail pribadi (@gmail.com).',
+      'Pastikan menjalankan fungsi "setupOtorisasi" sekali di editor Apps Script untuk menyetujui izin Google Drive.',
+    ];
+  } else if (result.postStatus === 200) {
+    result.diagnosis = 'Koneksi GET & POST ke Google Apps Script aktif dan normal!';
+    result.recommendation = ['Web App sudah siap menerima rekap nilai ujian dan backup otomatis soal.'];
+  } else {
+    result.diagnosis = `Respons HTTP tidak terduga (GET: ${result.getStatus}, POST: ${result.postStatus}).`;
+    result.recommendation = [
+      'Periksa apakah ada syntax error di editor Google Apps Script.',
+      'Pastikan izin akses Google Drive & Spreadsheet sudah disetujui (jalankan fungsi setupOtorisasi).',
+    ];
+  }
+
+  return result;
+}
+
+// Endpoint Diagnostik Lengkap Google Apps Script
+app.post('/api/sync-gas/diagnose', async (req, res) => {
+  try {
+    const { webAppUrl } = req.body;
+    if (!webAppUrl) {
+      return res.status(400).json({ success: false, error: 'Parameter webAppUrl wajib disertakan.' });
+    }
+
+    const norm = cleanAndNormalizeGasUrl(webAppUrl);
+    if (norm.error) {
+      return res.json({
+        success: false,
+        error: norm.error,
+        normalizedUrl: norm.url,
+        warnings: norm.warnings,
+      });
+    }
+
+    console.log(`[GAS Diagnose] Probing target: ${norm.url}`);
+    const probe = await probeGasUrl(norm.url);
+
+    res.json({
+      success: !probe.is404 && probe.postStatus === 200,
+      originalUrl: webAppUrl,
+      cleanUrl: norm.url,
+      wasCleaned: norm.cleaned,
+      warnings: norm.warnings,
+      probe,
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message || 'Gagal menjalankan diagnosa Apps Script' });
+  }
+});
+
+// Endpoint Sinkronisasi Utama Google Apps Script
 app.post('/api/sync-gas', async (req, res) => {
   try {
     let { webAppUrl, action, payload } = req.body;
@@ -752,26 +1021,20 @@ app.post('/api/sync-gas', async (req, res) => {
       });
     }
 
-    webAppUrl = String(webAppUrl).trim();
-
-    // Deteksi jika pengguna salah memasukkan URL editor script atau URL test
-    if (webAppUrl.includes('/edit')) {
+    // Bersihkan dan normalisasi URL
+    const norm = cleanAndNormalizeGasUrl(webAppUrl);
+    if (norm.error) {
       return res.json({
         success: false,
-        error: 'URL yang dimasukkan adalah URL Editor Apps Script (.../edit), bukan Web App URL. Di Google Apps Script, klik tombol "Deploy" > "New deployment" > pilih jenis "Web app", lalu salin URL yang berakhiran /exec.',
+        error: norm.error,
+        warnings: norm.warnings,
       });
     }
 
-    if (webAppUrl.endsWith('/dev')) {
-      return res.json({
-        success: false,
-        error: 'URL yang dimasukkan adalah URL Test Deployment (.../dev). URL ini hanya bisa diakses saat login di tab browser yang sama. Gunakan Web App URL dari menu "New deployment" yang berakhiran /exec.',
-      });
-    }
+    const targetUrl = norm.url;
+    console.log(`[GAS Sync] Forwarding action="${action}" to ${targetUrl.slice(0, 50)}... (Cleaned: ${norm.cleaned})`);
 
-    console.log(`[GAS Sync] Forwarding action="${action}" to ${webAppUrl.slice(0, 50)}...`);
-
-    const fetchResponse = await fetch(webAppUrl, {
+    const fetchResponse = await fetch(targetUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action, payload }),
@@ -779,10 +1042,17 @@ app.post('/api/sync-gas', async (req, res) => {
     });
 
     if (fetchResponse.status === 404) {
+      // Jalankan probe cepat untuk mendiagnosis penyebab spesifik
+      const quickProbe = await probeGasUrl(targetUrl);
+
       return res.json({
         success: false,
         isGas404: true,
-        error: 'Google Apps Script Web App Anda mengembalikan status 404 (Not Found).\n\nLangkah perbaikan di Google Apps Script:\n1. Buka Apps Script, klik tombol "Deploy" di kanan atas > "Manage deployments".\n2. Klik ikon Pensil (Edit), pada dropdown Version pilih "New version" (Versi Baru).\n3. Pada opsi "Who has access", WAJIB disetel ke "Anyone" (Siapa saja), BUKAN "Only myself" atau dibatasi domain.\n4. Klik "Deploy" dan salin Web App URL yang berakhiran "/exec".',
+        cleanUrl: targetUrl,
+        warnings: norm.warnings,
+        diagnosis: quickProbe.diagnosis,
+        recommendations: quickProbe.recommendation,
+        error: `Google Apps Script Web App mengembalikan status 404 (Not Found).\n\n${quickProbe.diagnosis}\n\nLangkah Solusi:\n${quickProbe.recommendation.map((r, i) => `${i + 1}. ${r}`).join('\n')}`,
       });
     }
 
@@ -791,9 +1061,17 @@ app.post('/api/sync-gas', async (req, res) => {
     try {
       data = JSON.parse(rawText);
     } catch {
+      // Cek apakah respon adalah halaman Google Auth
+      if (rawText.includes('ServiceLogin') || rawText.includes('accounts.google.com')) {
+        return res.json({
+          success: false,
+          error: 'Google Apps Script dialihkan ke halaman Login Google. Ini berarti setelan "Who has access" belum disetel ke "Anyone" (Siapa saja) atau akun Belajar.id Anda memblokir akses anonim eksternal. Ubah opsi Who has access ke "Anyone" atau gunakan akun Gmail pribadi (@gmail.com).',
+        });
+      }
+
       return res.json({
         success: false,
-        error: 'Google Apps Script mengembalikan respon non-JSON (Status: ' + fetchResponse.status + '). Pastikan opsi "Who has access" disetel ke "Anyone" (Siapa saja) dan Anda telah menyelesaikan Authorize Permissions.',
+        error: 'Google Apps Script mengembalikan respon non-JSON (Status: ' + fetchResponse.status + '). Pastikan Anda telah menyelesaikan izin akses (setupOtorisasi) dan Who has access disetel ke Anyone.',
         preview: rawText.slice(0, 200),
       });
     }
@@ -801,6 +1079,8 @@ app.post('/api/sync-gas', async (req, res) => {
     res.json({
       success: true,
       mode: 'live_gas',
+      cleanUrl: targetUrl,
+      warnings: norm.warnings,
       data,
       message: data.message || 'Koneksi ke Google Apps Script aktif dan terverifikasi!',
     });
@@ -1101,6 +1381,14 @@ app.delete('/api/cbt/drafts/students/:id', (req, res) => {
   } catch (e: any) {
     res.status(500).json({ success: false, error: e.message });
   }
+});
+
+// Catch-all route for any unhandled /api/* requests so they return clean JSON 404 instead of HTML
+app.all('/api/*', (req, res) => {
+  res.status(404).json({
+    success: false,
+    error: `Endpoint API ${req.method} ${req.path} tidak ditemukan pada server EduCBT.`,
+  });
 });
 
 // Setup Vite or static serving

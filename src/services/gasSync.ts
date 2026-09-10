@@ -5,25 +5,62 @@ export const APPS_SCRIPT_CODE = `/**
  * =========================================================================
  * GOOGLE APPS SCRIPT (Code.gs) - EDU-CBT AI & GOOGLE SHEETS & DRIVE ENGINE
  * =========================================================================
- * Panduan Pemasangan Agar TIDAK Mengalami Error 404:
- * 1. Buka Google Spreadsheet baru di Google Drive Anda.
- * 2. Buka menu Extensions (Ekstensi) > Apps Script.
- * 3. Hapus kode bawaan lalu tempel (paste) seluruh kode ini.
- * 4. Klik ikon "Save" (Disket).
- * 5. Klik tombol "Deploy" (Terapkan) di pojok kanan atas > pilih "New deployment" (Penerapan baru).
- * 6. Pada ikon roda gigi (Select type), pilih "Web app".
- *    - Description: EduCBT AI Integration Web App
- *    - Execute as: Me (Email Google Anda)
- *    - Who has access: Anyone (Siapa saja)  <-- WAJIB "Anyone", BUKAN "Only myself"
- * 7. Klik "Deploy" dan selesaikan izin akses (Review Permissions > pilih akun > Advanced > Go to (unsafe) > Allow).
- * 8. Salin "Web app URL" yang berakhiran "/exec" (BUKAN yang berakhiran /edit atau /dev).
- * 9. Tempelkan Web App URL tersebut ke menu "Integrasi Google Apps Script" di aplikasi EduCBT AI.
+ * SOLUSI ANTI-ERROR 404 & PANDUAN LENGKAP:
+ * 
+ * 1. KENAPA ERROR 404 TERJADI MESKI LANGKAH SUDAH BENAR?
+ *    a. Akun Google Workspace / Belajar.id:
+ *       Banyak akun dinas (@belajar.id atau domain sekolah) mengunci setelan
+ *       berbagi sehingga opsi "Anyone" (Siapa saja) tidak mengizinkan akses publik
+ *       luar domain. Jika ini terjadi, gunakan akun Gmail pribadi (@gmail.com)
+ *       untuk membuat Spreadsheet & Apps Script ini.
+ *    b. Versi Deployment Belum Diperbarui:
+ *       Di Apps Script, mengklik tombol "Save" (Disket) TIDAK mengupdate deployment!
+ *       Anda WAJIB ke Deploy > Manage deployments > ikon Pensil (Edit) > Version: "New version" > Deploy.
+ *    c. Pengaturan "Who has access" Salah:
+ *       Harus dipilih "Anyone" (Siapa saja), BUKAN "Only myself" atau "Anyone with Google account".
+ *    d. Path Multi-Akun (/u/0/ atau /u/1/):
+ *       Jika URL Anda mengandung /u/0/ atau /u/1/, aplikasi EduCBT akan otomatis
+ *       membersihkannya menjadi https://script.google.com/macros/s/.../exec.
+ *
+ * 2. LANGKAH PEMASANGAN RESMI:
+ *    Langkah 1: Buat Spreadsheet baru di Google Drive (atau buka script.google.com).
+ *    Langkah 2: Buka menu Extensions (Ekstensi) > Apps Script.
+ *    Langkah 3: Hapus seluruh kode bawaan (myFunction) dan tempel (paste) kode ini.
+ *    Langkah 4: Klik ikon Disket (Save).
+ *    Langkah 5: [PENTING] Pilih fungsi "setupOtorisasi" di dropdown atas, lalu klik "Jalankan" (Run).
+ *               Selesaikan pop-up Review Permissions > Pilih Akun > Advanced > Go to (unsafe) > Allow.
+ *    Langkah 6: Klik tombol "Deploy" (Terapkan) di kanan atas > "New deployment" (Penerapan baru).
+ *    Langkah 7: Klik ikon roda gigi > pilih jenis "Web app".
+ *               - Description: EduCBT AI Web App
+ *               - Execute as: Me (Email Google Anda)
+ *               - Who has access: Anyone (Siapa saja)  <-- WAJIB ANYONE
+ *    Langkah 8: Klik "Deploy", lalu salin "Web app URL" (berakhiran /exec).
+ *    Langkah 9: Tempel URL tersebut ke menu Integrasi Google Apps Script di aplikasi EduCBT AI.
  */
 
 // Nama Folder Khusus Penyimpanan di Google Drive
 const ROOT_FOLDER_NAME = "EduCBT";
 const SUB_FOLDER_SOAL = "Riwayat Soal";
 const SUB_FOLDER_HASIL = "Hasil Ujian";
+
+/**
+ * JALANKAN FUNGSI INI PERTAMA KALI DI EDITOR APPS SCRIPT:
+ * Pilih "setupOtorisasi" di dropdown fungsi sebelah tombol "Debug",
+ * lalu klik "Jalankan" (Run) untuk memunculkan pop-up izin Google Drive & Sheets.
+ */
+function setupOtorisasi() {
+  try {
+    var folders = getOrCreateBackupFolders();
+    var ss = getTargetSpreadsheet();
+    Logger.log("✅ OTORISASI BERHASIL!");
+    Logger.log("📁 Folder Root: " + folders.root.getName() + " (ID: " + folders.root.getId() + ")");
+    Logger.log("📊 Spreadsheet: " + ss.getName() + " (URL: " + ss.getUrl() + ")");
+    return "✅ Otorisasi Sukses! Spreadsheet dan Folder Google Drive telah siap digunakan.";
+  } catch (err) {
+    Logger.log("❌ Gagal otorisasi: " + err.toString());
+    throw err;
+  }
+}
 
 // Inisialisasi atau dapatkan folder di Google Drive
 function getOrCreateBackupFolders() {
@@ -63,26 +100,33 @@ function getTargetSpreadsheet() {
   return SpreadsheetApp.create("EduCBT_Rekap_Nilai_Siswa");
 }
 
-// Endpoint GET: Dipanggil saat URL dibuka di browser atau diuji via GET
+// Endpoint GET: Dipanggil saat URL dibuka di tab browser atau diuji via GET Probe
 function doGet(e) {
   try {
+    var action = (e && e.parameter && e.parameter.action) || "ping";
     var folders = getOrCreateBackupFolders();
     var ss = getTargetSpreadsheet();
+
     return ContentService.createTextOutput(JSON.stringify({
       status: "success",
-      message: "✅ Web App EduCBT AI Aktif & Berhasil Terhubung ke Google Sheets & Google Drive!",
-      spreadsheetName: ss ? ss.getName() : "Aktif",
+      success: true,
+      action: action,
+      message: "✅ Web App EduCBT AI Aktif & Siap Menerima Data!",
+      spreadsheetName: ss ? ss.getName() : "EduCBT_Rekap_Nilai_Siswa",
+      spreadsheetUrl: ss ? ss.getUrl() : "",
       folders: {
         root: folders.root.getName(),
         soal: folders.soal.getName(),
         hasil: folders.hasil.getName()
       },
+      auth: "Anyone - OK",
       timestamp: new Date().toISOString()
     })).setMimeType(ContentService.MimeType.JSON);
   } catch (err) {
     return ContentService.createTextOutput(JSON.stringify({
       status: "warning",
-      message: "Web App aktif namun memerlukan persetujuan izin akses Google Drive: " + err.toString(),
+      success: false,
+      message: "Web App aktif namun memerlukan persetujuan izin akses Google Drive & Sheets. Silakan jalankan fungsi 'setupOtorisasi' di editor Apps Script: " + err.toString(),
       timestamp: new Date().toISOString()
     })).setMimeType(ContentService.MimeType.JSON);
   }
@@ -93,10 +137,19 @@ function doPost(e) {
   try {
     var data = {};
     if (e && e.postData && e.postData.contents) {
-      data = JSON.parse(e.postData.contents);
+      try {
+        data = JSON.parse(e.postData.contents);
+      } catch (parseErr) {
+        data = {};
+      }
     }
+    
+    // Fallback baca parameter jika dikirim via URL / Form
     var action = data.action || (e && e.parameter && e.parameter.action) || "test_connection";
     var payload = data.payload || {};
+    if (typeof payload === 'string') {
+      try { payload = JSON.parse(payload); } catch(pErr) {}
+    }
 
     var folders = getOrCreateBackupFolders();
     var ss = getTargetSpreadsheet();
@@ -105,7 +158,10 @@ function doPost(e) {
     if (action === "test_connection" || action === "ping") {
       return ContentService.createTextOutput(JSON.stringify({
         status: "success",
+        success: true,
         message: "Koneksi Google Apps Script, Google Sheets, dan Google Drive aktif dan siap menerima data!",
+        spreadsheetName: ss ? ss.getName() : "Aktif",
+        folderName: folders.root ? folders.root.getName() : "EduCBT",
         timestamp: new Date().toISOString()
       })).setMimeType(ContentService.MimeType.JSON);
     }
@@ -153,6 +209,7 @@ function doPost(e) {
 
       return ContentService.createTextOutput(JSON.stringify({
         status: "success",
+        success: true,
         message: "Hasil ujian berhasil dicatat ke Google Sheet Rekap_Nilai dan diarsipkan di EduCBT/Hasil Ujian!",
         fileName: fileName
       })).setMimeType(ContentService.MimeType.JSON);
@@ -171,6 +228,7 @@ function doPost(e) {
 
       return ContentService.createTextOutput(JSON.stringify({
         status: "success",
+        success: true,
         message: "Soal berhasil diarsipkan ke Google Drive di folder EduCBT/Riwayat Soal (.json dan .txt)!",
         jsonFile: jsonFileName,
         txtFile: txtFileName
@@ -183,6 +241,7 @@ function doPost(e) {
       folders.root.createFile(fullBackupName, JSON.stringify(payload, null, 2), MimeType.PLAIN_TEXT);
       return ContentService.createTextOutput(JSON.stringify({
         status: "success",
+        success: true,
         message: "Data lengkap EduCBT berhasil dicadangkan ke Google Drive folder EduCBT!",
         fileName: fullBackupName
       })).setMimeType(ContentService.MimeType.JSON);
@@ -190,12 +249,14 @@ function doPost(e) {
 
     return ContentService.createTextOutput(JSON.stringify({
       status: "error",
+      success: false,
       message: "Aksi tidak dikenal: " + action
     })).setMimeType(ContentService.MimeType.JSON);
 
   } catch (err) {
     return ContentService.createTextOutput(JSON.stringify({
       status: "error",
+      success: false,
       error: err.toString()
     })).setMimeType(ContentService.MimeType.JSON);
   }

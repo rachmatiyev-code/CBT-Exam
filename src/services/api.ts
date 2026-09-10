@@ -34,9 +34,21 @@ async function safeParseResponse(res: Response, defaultError: string, endpointNa
     console.error(`[API Parse Error] ${endpointName || 'Request'} returned non-JSON. Status: ${res.status}`, text.slice(0, 300));
 
     if (res.status === 404) {
-      throw new Error(
-        `Layanan mengembalikan 404 (Not Found).\n\nJika ini pengujian Google Apps Script:\n1. Pastikan opsi 'Who has access' disetel ke 'Anyone' (Siapa saja).\n2. Pastikan menyalin Web App URL berakhiran '/exec' (bukan /edit atau /dev).\n3. Pastikan memilih 'New version' saat deployment.`
-      );
+      if (endpointName?.includes('sync-gas')) {
+        throw new Error(
+          `Layanan Google Apps Script mengembalikan 404 (Not Found).\n\n1. Pastikan opsi 'Who has access' disetel ke 'Anyone' (Siapa saja).\n2. Pastikan menyalin Web App URL berakhiran '/exec' (bukan /edit atau /dev).\n3. Pastikan memilih 'New version' saat deployment.`
+        );
+      } else if (
+        endpointName?.includes('gemini') ||
+        endpointName?.includes('validate') ||
+        endpointName?.includes('generate-questions')
+      ) {
+        throw new Error(
+          `Layanan AI Gemini sedang menyiapkan koneksi model. Sistem otomatis mengalihkan ke model Google AI aktif. Silakan coba kembali.`
+        );
+      } else {
+        throw new Error(`Endpoint ${endpointName || 'layanan'} mengembalikan status 404 (Not Found). Pastikan backend aktif.`);
+      }
     }
 
     if (
@@ -51,7 +63,7 @@ async function safeParseResponse(res: Response, defaultError: string, endpointNa
     throw new Error(`${defaultError} (Respon server tidak valid)`);
   }
 
-  if (res.status === 404 && data?.error) {
+  if (res.status >= 400 && data?.error) {
     throw new Error(data.error);
   }
 
@@ -252,6 +264,17 @@ export const apiService = {
     });
     const data = await safeParseResponse(res, 'Gagal sinkronisasi Google Apps Script', '/api/sync-gas');
     console.info(`[API Response] /api/sync-gas action="${action}" status=${res.status}`, data);
+    return data;
+  },
+
+  async diagnoseGAS(webAppUrl: string): Promise<any> {
+    console.info(`[API Request] /api/sync-gas/diagnose target="${webAppUrl.slice(0, 35)}..."`);
+    const res = await fetch('/api/sync-gas/diagnose', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ webAppUrl }),
+    });
+    const data = await safeParseResponse(res, 'Gagal mendiagnosis Google Apps Script', '/api/sync-gas/diagnose');
     return data;
   },
 

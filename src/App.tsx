@@ -241,9 +241,10 @@ export default function App() {
     const nowStr = new Date().toLocaleString('id-ID');
     setGoogleSettings((prev) => ({ ...prev, lastSyncTime: nowStr }));
 
+    let gasSuccess = false;
     try {
       if (googleSettings.webAppUrl) {
-        await apiService.syncWithGAS(
+        const res = await apiService.syncWithGAS(
           'backup_all',
           {
             school: schoolProfile,
@@ -253,6 +254,7 @@ export default function App() {
           },
           googleSettings.webAppUrl
         );
+        gasSuccess = !!res?.success;
       }
     } catch (e) {
       console.warn('GAS Sync note:', e);
@@ -260,9 +262,11 @@ export default function App() {
 
     const msg =
       customMessage ||
-      `Backup otomatis Google Drive berhasil! Folder: /Ujian-CBT-Backup dengan sub-folder /Soal-Ujian dan /Hasil-Ujian telah diperbarui.`;
+      (gasSuccess
+        ? `Backup Google Drive berhasil! Folder: /Ujian-CBT-Backup telah disinkronkan.`
+        : `Perubahan tersimpan di database lokal & server EduCBT.`);
     setBackupToast(msg);
-    setTimeout(() => setBackupToast(null), 5000);
+    setTimeout(() => setBackupToast(null), 4000);
   };
 
   // Launch isolated student mode in a new browser tab or current tab

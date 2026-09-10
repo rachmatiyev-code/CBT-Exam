@@ -182,15 +182,19 @@ export const GeminiKeyModal: React.FC<GeminiKeyModalProps> = ({ isOpen, onClose,
               <span>Dapatkan Kunci API di Google AI Studio</span>
               <ExternalLink className="w-3 h-3" />
             </a>
-            {apiKey && (
+            {apiKey ? (
               <button
                 type="button"
                 onClick={handleClear}
-                className="text-rose-600 hover:text-rose-700 hover:underline"
+                className="text-indigo-600 hover:text-indigo-800 font-medium hover:underline flex items-center gap-1"
               >
-                Gunakan Kunci Server
+                <span>Pakai Kunci Server Bawaan</span>
               </button>
-            )}
+            ) : hasServerKey ? (
+              <span className="text-emerald-700 font-medium text-[11px]">
+                Kunci Server siap digunakan secara otomatis
+              </span>
+            ) : null}
           </div>
         </div>
 
