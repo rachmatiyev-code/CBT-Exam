@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, Key, CheckCircle, AlertCircle, RefreshCw, Sparkles, ExternalLink } from 'lucide-react';
 import { apiService } from '../services/api';
+import { CopyableErrorAlert } from './CopyableErrorAlert';
 
 interface GeminiKeyModalProps {
   isOpen: boolean;
@@ -156,20 +157,19 @@ export const GeminiKeyModal: React.FC<GeminiKeyModalProps> = ({ isOpen, onClose,
 
           {/* Test connection result */}
           {testResult && (
-            <div
-              className={`p-3 rounded-xl border text-xs flex items-start gap-2.5 animate-in fade-in duration-200 ${
-                testResult.success
-                  ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                  : 'bg-rose-50 text-rose-800 border-rose-200'
-              }`}
-            >
-              {testResult.success ? (
+            testResult.success ? (
+              <div className="p-3 rounded-xl border text-xs flex items-start gap-2.5 animate-in fade-in duration-200 bg-emerald-50 text-emerald-800 border-emerald-200">
                 <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-              ) : (
-                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
-              )}
-              <div className="leading-relaxed font-medium">{testResult.message}</div>
-            </div>
+                <div className="leading-relaxed font-medium">{testResult.message}</div>
+              </div>
+            ) : (
+              <CopyableErrorAlert
+                error={testResult.message}
+                title="Hasil Uji Kunci API"
+                onRetry={handleTestKey}
+                onClose={() => setTestResult(null)}
+              />
+            )
           )}
 
           <div className="flex items-center justify-between text-xs text-slate-500 pt-1">

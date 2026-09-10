@@ -19,6 +19,7 @@ import {
 import { AppsScriptSettings, Exam, StudentExamSession } from '../types';
 import { APPS_SCRIPT_CODE, excelService } from '../services/gasSync';
 import { apiService } from '../services/api';
+import { copyToClipboard } from '../utils/clipboard';
 
 interface GoogleIntegrationModalProps {
   isOpen: boolean;
@@ -53,6 +54,7 @@ export const GoogleIntegrationModal: React.FC<GoogleIntegrationModalProps> = ({
   const [diagnosticReport, setDiagnosticReport] = useState<any | null>(null);
   const [showTroubleshooting, setShowTroubleshooting] = useState(false);
   const [urlNotice, setUrlNotice] = useState<string | null>(null);
+  const [copiedError, setCopiedError] = useState(false);
 
   if (!isOpen) return null;
 
@@ -350,16 +352,52 @@ export const GoogleIntegrationModal: React.FC<GoogleIntegrationModalProps> = ({
                     : 'bg-rose-50 text-rose-900 border-rose-200'
                 }`}
               >
-                <div className="flex items-start gap-2.5">
-                  {testResult.success ? (
-                    <Check className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-                  ) : (
-                    <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                <div className="flex items-start justify-between gap-2.5">
+                  <div className="flex items-start gap-2.5 flex-1">
+                    {testResult.success ? (
+                      <Check className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                    ) : (
+                      <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                    )}
+                    <span className="font-medium select-text">{testResult.message}</span>
+                  </div>
+                  {!testResult.success && (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const recs = testResult.recommendations?.length
+                          ? `\n\nSaran Perbaikan:\n` + testResult.recommendations.map((r) => `- ${r}`).join('\n')
+                          : '';
+                        const fullText = `[EduCBT Apps Script Error]\n${testResult.message}${recs}`;
+                        const ok = await copyToClipboard(fullText);
+                        if (ok) {
+                          setCopiedError(true);
+                          setTimeout(() => setCopiedError(false), 2500);
+                        }
+                      }}
+                      className={`px-2.5 py-1 rounded-md text-[11px] font-semibold flex items-center gap-1 shrink-0 transition-colors shadow-xs ${
+                        copiedError
+                          ? 'bg-emerald-600 text-white'
+                          : 'bg-white hover:bg-rose-100 text-rose-800 border border-rose-300'
+                      }`}
+                      title="Salin pesan error dan langkah perbaikan"
+                    >
+                      {copiedError ? (
+                        <>
+                          <Check className="w-3 h-3 text-white" />
+                          <span>Tersalin!</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3 h-3 text-rose-700" />
+                          <span>Salin Error</span>
+                        </>
+                      )}
+                    </button>
                   )}
-                  <span className="font-medium">{testResult.message}</span>
                 </div>
                 {testResult.recommendations && testResult.recommendations.length > 0 && (
-                  <div className="mt-1 pl-6 space-y-1 text-rose-800 text-[11px]">
+                  <div className="mt-1 pl-6 space-y-1 text-rose-800 text-[11px] select-text">
                     <p className="font-semibold text-rose-900">Langkah Perbaikan yang Disarankan:</p>
                     {testResult.recommendations.map((rec, i) => (
                       <div key={i} className="flex items-start gap-1.5">

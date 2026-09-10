@@ -36,7 +36,7 @@ async function safeParseResponse(res: Response, defaultError: string, endpointNa
     if (res.status === 404) {
       if (endpointName?.includes('sync-gas')) {
         throw new Error(
-          `Layanan Google Apps Script mengembalikan 404 (Not Found).\n\n1. Pastikan opsi 'Who has access' disetel ke 'Anyone' (Siapa saja).\n2. Pastikan menyalin Web App URL berakhiran '/exec' (bukan /edit atau /dev).\n3. Pastikan memilih 'New version' saat deployment.`
+          `Layanan Google Apps Script mengembalikan status 404 (Not Found).\n\n1. Pastikan opsi 'Who has access' disetel ke 'Anyone' (Siapa saja).\n2. Pastikan menyalin Web App URL berakhiran '/exec' (bukan /edit atau /dev).\n3. Pastikan memilih 'New version' saat deployment.`
         );
       } else if (
         endpointName?.includes('gemini') ||
@@ -44,7 +44,7 @@ async function safeParseResponse(res: Response, defaultError: string, endpointNa
         endpointName?.includes('generate-questions')
       ) {
         throw new Error(
-          `Layanan AI Gemini sedang menyiapkan koneksi model. Sistem otomatis mengalihkan ke model Google AI aktif. Silakan coba kembali.`
+          `Endpoint layanan AI (${endpointName || '/api/gemini'}) mengembalikan status 404 (Not Found). Pastikan backend aktif dan rute API terdaftar.`
         );
       } else {
         throw new Error(`Endpoint ${endpointName || 'layanan'} mengembalikan status 404 (Not Found). Pastikan backend aktif.`);
@@ -103,7 +103,7 @@ export const apiService = {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ apiKey }),
       });
-      const data = await safeParseResponse(res, 'Gagal memvalidasi kunci API');
+      const data = await safeParseResponse(res, 'Gagal memvalidasi kunci API', '/api/validate-key');
       if (!data) {
         return { success: false, message: 'Server tidak merespons.' };
       }
@@ -169,7 +169,7 @@ export const apiService = {
         ...params,
       }),
     });
-    const data = await safeParseResponse(res, 'Gagal menganalisis hasil ujian');
+    const data = await safeParseResponse(res, 'Gagal menganalisis hasil ujian', '/api/analyze-exam-results');
     if (!data.success) {
       throw new Error(data.error || 'Gagal menganalisis hasil ujian');
     }
@@ -195,7 +195,7 @@ export const apiService = {
         ...params,
       }),
     });
-    const data = await safeParseResponse(res, 'Gagal evaluasi jawaban');
+    const data = await safeParseResponse(res, 'Gagal evaluasi jawaban', '/api/evaluate-submission');
     if (!data.success) {
       throw new Error(data.error || 'Gagal evaluasi jawaban');
     }
@@ -243,7 +243,7 @@ export const apiService = {
         ...params,
       }),
     });
-    const data = await safeParseResponse(res, 'Gagal membuat program remidi/pengayaan');
+    const data = await safeParseResponse(res, 'Gagal membuat program remidi/pengayaan', '/api/generate-remedial-enrichment');
     if (!data.success) {
       throw new Error(data.error || 'Gagal membuat program remidi/pengayaan');
     }

@@ -23,6 +23,17 @@ const appDir = getAppDirname();
 const app = express();
 const PORT = 3000;
 
+// CORS and Preflight Handling for multi-origin & iframe preview support
+app.use((req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(204);
+  }
+  next();
+});
+
 app.use(express.json({ limit: '10mb' }));
 
 // Global API Request Logger
@@ -33,9 +44,15 @@ app.use((req, _res, next) => {
   next();
 });
 
-// Health Check API
-app.get('/api/health', (_req, res) => {
-  res.json({ status: 'ok', time: new Date().toISOString() });
+// Comprehensive Health & Route Readiness Check API
+app.get(['/api/health', '/api/ping', '/api/status'], (_req, res) => {
+  res.json({
+    status: 'ok',
+    server: 'EduCBT AI Server',
+    active: true,
+    time: new Date().toISOString(),
+    geminiConfigured: !!cleanApiKey(process.env.GEMINI_API_KEY),
+  });
 });
 
 // =========================================================================
@@ -446,6 +463,14 @@ const handleValidateKey = async (req: any, res: any) => {
     res.status(400).json({ success: false, error: friendlyError, message: friendlyError });
   }
 };
+app.get(['/api/validate-key', '/api/gemini/validate', '/api/gemini/validate-key'], (_req, res) => {
+  const hasKey = !!cleanApiKey(process.env.GEMINI_API_KEY);
+  res.json({
+    success: true,
+    message: 'Endpoint /api/validate-key aktif. Kirim permintaan POST dengan { apiKey } untuk validasi.',
+    serverKeyAvailable: hasKey,
+  });
+});
 app.post('/api/validate-key', handleValidateKey);
 app.post('/api/gemini/validate', handleValidateKey);
 app.post('/api/gemini/validate-key', handleValidateKey);
@@ -535,6 +560,15 @@ Wajib kembalikan HANYA JSON murni (valid RFC 8259) tanpa komentar dan tanpa pemb
   }
 });
 
+// GET status for /api/evaluate-submission
+app.get('/api/evaluate-submission', (_req, res) => {
+  res.json({
+    success: true,
+    status: 'ok',
+    message: 'Endpoint /api/evaluate-submission aktif. Gunakan metode POST dengan parameter { type, question, studentAnswer, rubric } untuk evaluasi jawaban.',
+  });
+});
+
 // 3. Automated scoring for short answers and essays using AI with user-defined rubric
 app.post('/api/evaluate-submission', async (req, res) => {
   try {
@@ -617,6 +651,13 @@ Kembalikan HANYA JSON valid RFC 8259 (tanpa markdown tambahan):
 });
 
 // 3B. Endpoints for EduCBT / Riwayat Soal (Server filesystem archive)
+app.get('/api/educbt/archive-questions', (_req, res) => {
+  res.json({
+    success: true,
+    status: 'ok',
+    message: 'Endpoint /api/educbt/archive-questions aktif. Gunakan POST { exam, txtContent } untuk menyimpan arsip soal.',
+  });
+});
 app.post('/api/educbt/archive-questions', (req, res) => {
   try {
     const { exam, txtContent } = req.body;
@@ -672,6 +713,15 @@ app.get('/api/educbt/archives', (_req, res) => {
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
+});
+
+// GET status for /api/generate-remedial-enrichment
+app.get('/api/generate-remedial-enrichment', (_req, res) => {
+  res.json({
+    success: true,
+    status: 'ok',
+    message: 'Endpoint /api/generate-remedial-enrichment aktif. Gunakan POST { studentName, subject, finalScore, kkm } untuk generate rekomendasi remedial.',
+  });
 });
 
 // 4. AI Remedial & Enrichment generation based on exam results
@@ -734,6 +784,15 @@ Kembalikan HANYA JSON murni (valid RFC 8259):
     const friendlyError = formatGeminiError(error);
     res.status(500).json({ success: false, error: friendlyError });
   }
+});
+
+// GET status for /api/analyze-exam-results
+app.get('/api/analyze-exam-results', (_req, res) => {
+  res.json({
+    success: true,
+    status: 'ok',
+    message: 'Endpoint /api/analyze-exam-results aktif. Gunakan POST { examTitle, subject, grade, avgScore, passRate } untuk analisis hasil ujian.',
+  });
 });
 
 // 5. Comprehensive AI Exam & Item Analysis for Teacher Decision Making
@@ -975,6 +1034,13 @@ async function probeGasUrl(targetUrl: string) {
 }
 
 // Endpoint Diagnostik Lengkap Google Apps Script
+app.get('/api/sync-gas/diagnose', (_req, res) => {
+  res.json({
+    success: true,
+    status: 'ok',
+    message: 'Endpoint /api/sync-gas/diagnose aktif. Gunakan POST { webAppUrl } untuk menjalankan diagnosa mendalam koneksi Web App.',
+  });
+});
 app.post('/api/sync-gas/diagnose', async (req, res) => {
   try {
     const { webAppUrl } = req.body;

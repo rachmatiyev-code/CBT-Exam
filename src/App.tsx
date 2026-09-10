@@ -29,7 +29,8 @@ import { GoogleIntegrationModal } from './components/GoogleIntegrationModal';
 import { AiQuestionModal } from './components/AiQuestionModal';
 import { PrintReportModal } from './components/PrintReportModal';
 import { ShareStudentLinkModal } from './components/ShareStudentLinkModal';
-import { CheckCircle, X } from 'lucide-react';
+import { CheckCircle, X, AlertCircle, Copy, Check } from 'lucide-react';
+import { copyToClipboard } from './utils/clipboard';
 
 export default function App() {
   // Check if opened directly in student mode via URL param (?mode=siswa)
@@ -92,7 +93,23 @@ export default function App() {
   const [isAiQuestionModalOpen, setIsAiQuestionModalOpen] = useState(false);
   const [isShareLinkModalOpen, setIsShareLinkModalOpen] = useState(false);
   const [backupToast, setBackupToast] = useState<string | null>(null);
+  const [errorToast, setErrorToast] = useState<{ message: string; title?: string } | null>(null);
+  const [errorToastCopied, setErrorToastCopied] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+
+  // Global listener for copyable errors triggered from anywhere in the app
+  useEffect(() => {
+    const errorHandler = (e: any) => {
+      if (e.detail?.message) {
+        setErrorToast({
+          message: e.detail.message,
+          title: e.detail.title || 'Kendala Layanan',
+        });
+      }
+    };
+    window.addEventListener('educbt:error' as any, errorHandler);
+    return () => window.removeEventListener('educbt:error' as any, errorHandler);
+  }, []);
 
   // Print modal state
   const [printConfig, setPrintConfig] = useState<{
@@ -377,12 +394,70 @@ export default function App() {
           onToggleMobileSidebar={() => setMobileSidebarOpen(!mobileSidebarOpen)}
         />
 
+        {/* Global Copyable Error Toast */}
+        {errorToast && (
+          <div className="bg-rose-700 text-white px-4 py-2.5 text-xs shadow-md flex items-center justify-between transition-all animate-in slide-in-from-top shrink-0 border-b border-rose-800">
+            <div className="flex items-center gap-3 max-w-7xl mx-auto w-full">
+              <AlertCircle className="w-4 h-4 text-rose-200 shrink-0" />
+              <div className="flex-1 min-w-0 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                <div className="truncate">
+                  {errorToast.title && (
+                    <span className="font-bold mr-2 text-rose-100">
+                      [{errorToast.title}]
+                    </span>
+                  )}
+                  <span className="select-text font-mono text-[11px] bg-rose-800/90 px-2 py-0.5 rounded border border-rose-600/60 inline-block">
+                    {errorToast.message}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const ok = await copyToClipboard(errorToast.message);
+                      if (ok) {
+                        setErrorToastCopied(true);
+                        setTimeout(() => setErrorToastCopied(false), 2500);
+                      }
+                    }}
+                    className={`px-2.5 py-1 rounded text-[11px] font-semibold flex items-center gap-1.5 transition-colors shadow-xs ${
+                      errorToastCopied
+                        ? 'bg-emerald-500 text-white'
+                        : 'bg-white text-rose-900 hover:bg-rose-100'
+                    }`}
+                    title="Salin pesan error ke clipboard"
+                  >
+                    {errorToastCopied ? (
+                      <>
+                        <Check className="w-3.5 h-3.5 text-white" />
+                        <span>Error Tersalin!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3.5 h-3.5 text-rose-700" />
+                        <span>Salin Error</span>
+                      </>
+                    )}
+                  </button>
+                  <button
+                    onClick={() => setErrorToast(null)}
+                    className="text-white/80 hover:text-white p-1 rounded hover:bg-rose-800"
+                    title="Tutup notifikasi"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Auto Backup Notification Toast */}
         {backupToast && (
           <div className="bg-emerald-600 text-white px-4 py-2.5 text-xs font-semibold shadow-xs flex items-center justify-between transition-all animate-in slide-in-from-top shrink-0">
             <div className="flex items-center gap-2 max-w-7xl mx-auto w-full">
               <CheckCircle className="w-4 h-4 text-emerald-200 shrink-0" />
-              <span>{backupToast}</span>
+              <span className="select-text">{backupToast}</span>
             </div>
             <button onClick={() => setBackupToast(null)} className="text-white/80 hover:text-white text-xs">
               ✕

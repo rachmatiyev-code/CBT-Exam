@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { Question, QuestionType, Exam } from '../types';
 import { apiService } from '../services/api';
+import { CopyableErrorAlert } from './CopyableErrorAlert';
 
 interface AiQuestionModalProps {
   isOpen: boolean;
@@ -414,10 +415,12 @@ export const AiQuestionModal: React.FC<AiQuestionModalProps> = ({
               </div>
 
               {error && (
-                <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-700 flex items-start gap-2">
-                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
-                  <span className="leading-relaxed">{error}</span>
-                </div>
+                <CopyableErrorAlert
+                  error={error}
+                  title="Kendala Pembuatan Soal AI"
+                  onClose={() => setError(null)}
+                  onRetry={handleGenerate}
+                />
               )}
             </div>
           ) : (

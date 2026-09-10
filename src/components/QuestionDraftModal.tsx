@@ -11,9 +11,12 @@ import {
   Layers,
   Sparkles,
   HelpCircle,
+  Copy,
+  Check,
 } from 'lucide-react';
 import { Exam, Question, QuestionDraft } from '../types';
 import { apiService } from '../services/api';
+import { copyToClipboard } from '../utils/clipboard';
 
 interface QuestionDraftModalProps {
   isOpen: boolean;
@@ -35,6 +38,7 @@ export const QuestionDraftModal: React.FC<QuestionDraftModalProps> = ({
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [copiedFeedback, setCopiedFeedback] = useState(false);
 
   // Form state for saving new draft
   const [draftTitle, setDraftTitle] = useState('');
@@ -199,18 +203,50 @@ export const QuestionDraftModal: React.FC<QuestionDraftModalProps> = ({
         {/* Feedback Alert */}
         {feedback && (
           <div
-            className={`mx-6 mt-4 p-3 rounded-xl text-xs font-semibold flex items-center gap-2 border ${
+            className={`mx-6 mt-4 p-3 rounded-xl text-xs font-semibold flex items-center justify-between gap-2 border ${
               feedback.type === 'success'
                 ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
                 : 'bg-rose-50 text-rose-800 border-rose-200'
             }`}
           >
-            {feedback.type === 'success' ? (
-              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-            ) : (
-              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+            <div className="flex items-center gap-2 flex-1 min-w-0">
+              {feedback.type === 'success' ? (
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              ) : (
+                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+              )}
+              <span className="select-text font-mono text-[11px] truncate sm:whitespace-normal">{feedback.text}</span>
+            </div>
+            {feedback.type === 'error' && (
+              <button
+                type="button"
+                onClick={async () => {
+                  const ok = await copyToClipboard(feedback.text);
+                  if (ok) {
+                    setCopiedFeedback(true);
+                    setTimeout(() => setCopiedFeedback(false), 2500);
+                  }
+                }}
+                className={`px-2 py-1 rounded text-[11px] font-semibold flex items-center gap-1 shrink-0 transition-colors ${
+                  copiedFeedback
+                    ? 'bg-emerald-600 text-white'
+                    : 'bg-white hover:bg-rose-100 text-rose-800 border border-rose-300'
+                }`}
+                title="Salin pesan error"
+              >
+                {copiedFeedback ? (
+                  <>
+                    <Check className="w-3 h-3 text-white" />
+                    <span>Tersalin!</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3 h-3 text-rose-700" />
+                    <span>Salin</span>
+                  </>
+                )}
+              </button>
             )}
-            <span>{feedback.text}</span>
           </div>
         )}
 
