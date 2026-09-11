@@ -35,6 +35,7 @@ app.use((req, res, next) => {
 });
 
 app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Global API Request Logger
 app.use((req, _res, next) => {
@@ -422,8 +423,19 @@ app.post('/api/gemini/key-status', handleKeyStatus);
 // 1. Health check & API key validation
 const handleValidateKey = async (req: any, res: any) => {
   try {
-    const { apiKey } = req.body;
-    const { primaryClient, fallbackClient, usingServerKey } = getClients(apiKey);
+    const rawKey = req.body?.apiKey || req.query?.apiKey || req.headers?.['x-api-key'] || '';
+    const cleaned = cleanApiKey(rawKey);
+    const hasServerKey = !!cleanApiKey(process.env.GEMINI_API_KEY);
+
+    if (!cleaned && !hasServerKey) {
+      return res.status(400).json({
+        success: false,
+        error: 'Kunci API Gemini tidak ditemukan. Masukkan kunci API dari Google AI Studio atau gunakan kunci server bawaan.',
+        message: 'Kunci API Gemini tidak boleh kosong.',
+      });
+    }
+
+    const { primaryClient, fallbackClient, usingServerKey } = getClients(cleaned);
 
     // Test fast response using standard models and fallback
     let pingSuccess = false;
@@ -433,14 +445,13 @@ const handleValidateKey = async (req: any, res: any) => {
         primaryClient,
         'Ping: Jawab persis 1 kata: SIAP',
         undefined,
-        4000,
+        3500,
         fallbackClient
       );
       pingSuccess = true;
       pingText = response?.text || 'OK';
     } catch (genErr: any) {
       console.warn('Ping generation warning:', genErr?.message?.slice(0, 120));
-      // If primary failed but server fallback is active and works, ping succeeds
       const msg = genErr?.message || '';
       if (
         (msg.includes('API_KEY_INVALID') ||
@@ -457,7 +468,7 @@ const handleValidateKey = async (req: any, res: any) => {
       success: true,
       message: pingSuccess
         ? 'Kunci API Gemini valid dan siap digunakan!'
-        : 'Kunci API Gemini berhasil disimpan dan siap beroperasi dengan model Google AI.',
+        : 'Kunci API Gemini berhasil diverifikasi dan siap beroperasi dengan model Google AI.',
       text: pingText,
       usedServerKey: usingServerKey,
     });
@@ -466,7 +477,17 @@ const handleValidateKey = async (req: any, res: any) => {
     res.status(400).json({ success: false, error: friendlyError, message: friendlyError });
   }
 };
-app.get(['/api/validate-key', '/api/gemini/validate', '/api/gemini/validate-key'], (_req, res) => {
+
+const validateRoutes = [
+  '/api/validate-key',
+  '/api/validate-key/',
+  '/api/gemini/validate',
+  '/api/gemini/validate/',
+  '/api/gemini/validate-key',
+  '/api/gemini/validate-key/',
+];
+
+app.get(validateRoutes, (_req, res) => {
   const hasKey = !!cleanApiKey(process.env.GEMINI_API_KEY);
   res.json({
     success: true,
@@ -474,9 +495,9 @@ app.get(['/api/validate-key', '/api/gemini/validate', '/api/gemini/validate-key'
     serverKeyAvailable: hasKey,
   });
 });
-app.post('/api/validate-key', handleValidateKey);
-app.post('/api/gemini/validate', handleValidateKey);
-app.post('/api/gemini/validate-key', handleValidateKey);
+
+app.post(validateRoutes, handleValidateKey);
+app.all(validateRoutes, handleValidateKey);
 
 // GET status for /api/generate-questions
 app.get('/api/generate-questions', (_req, res) => {

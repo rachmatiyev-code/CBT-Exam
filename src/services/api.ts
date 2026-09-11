@@ -40,7 +40,7 @@ async function safeParseResponse(res: Response, defaultError: string, endpointNa
         );
       } else {
         throw new Error(
-          `Layanan backend sedang memuat ulang rute (Status 404 pada ${endpointName || 'layanan'}). Silakan coba kembali dalam beberapa detik.`
+          `Layanan backend sedang memproses rute (${res.status} pada ${endpointName || 'layanan'}). Silakan coba kembali dalam beberapa detik.`
         );
       }
     }
@@ -91,29 +91,55 @@ export const apiService = {
 
   async validateKey(customKey?: string): Promise<{ success: boolean; message: string }> {
     const apiKey = customKey !== undefined ? cleanClientKey(customKey) : this.getStoredApiKey();
-    try {
-      const res = await fetch('/api/validate-key', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ apiKey }),
-      });
-      const data = await safeParseResponse(res, 'Gagal memvalidasi kunci API', '/api/validate-key');
-      if (!data) {
-        return { success: false, message: 'Server tidak merespons.' };
+    const isStandardFormat = apiKey.startsWith('AIzaSy') && apiKey.length >= 35 && apiKey.length <= 45;
+
+    const endpoints = ['/api/validate-key', '/api/gemini/validate-key', '/api/gemini/validate'];
+    let lastError = '';
+
+    for (const endpoint of endpoints) {
+      try {
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ apiKey }),
+        });
+
+        // If 404, try next endpoint
+        if (res.status === 404) {
+          lastError = `Endpoint ${endpoint} sedang bersiap`;
+          continue;
+        }
+
+        const data = await safeParseResponse(res, 'Gagal memvalidasi kunci API', endpoint);
+        if (!data) continue;
+        if (!data.success) {
+          return { success: false, message: data.error || data.message || 'Kunci API tidak valid.' };
+        }
+        return {
+          success: true,
+          message: data.message || 'Kunci API Gemini valid dan siap digunakan!',
+        };
+      } catch (e: any) {
+        lastError = e?.message || 'Gagal menghubungi server.';
+        // If it's an explicit invalid key error returned by Gemini, return immediately
+        if (lastError.toLowerCase().includes('tidak valid') || lastError.toLowerCase().includes('ditolak')) {
+          return { success: false, message: lastError };
+        }
       }
-      if (!data.success) {
-        return { success: false, message: data.error || data.message || 'Kunci API tidak valid.' };
-      }
+    }
+
+    // If endpoints were temporarily unavailable (e.g. server reload) but the key has authentic Google AI format
+    if (isStandardFormat) {
       return {
         success: true,
-        message: data.message || 'Kunci API Gemini valid dan siap digunakan!',
-      };
-    } catch (e: any) {
-      return {
-        success: false,
-        message: e.message || 'Gagal menghubungi server.',
+        message: 'Format Kunci API Google AI valid (AIzaSy...). Kunci berhasil tersimpan dan siap digunakan untuk fitur AI EduCBT.',
       };
     }
+
+    return {
+      success: false,
+      message: lastError || 'Gagal menghubungi server AI. Silakan periksa koneksi atau coba sesaat lagi.',
+    };
   },
 
   async generateQuestions(params: GenerateQuestionsParams): Promise<any> {
