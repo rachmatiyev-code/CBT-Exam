@@ -242,8 +242,8 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, timeoutMsg: stri
 
 // Generate content with automatic model fallback and timeout protection
 async function generateWithFallback(client: GoogleGenAI, contents: any, config?: any, timeoutMs = 25000, fallbackClient?: GoogleGenAI) {
-  // Test gemini-2.5-flash and gemini-3.8-flash first (standard across all keys), then gemini-flash-latest, then gemini-3.1-flash-lite
-  const models = ['gemini-2.5-flash', 'gemini-3.8-flash', 'gemini-flash-latest', 'gemini-3.1-flash-lite'];
+  // Use approved models: gemini-3.8-flash, gemini-flash-latest, gemini-3.1-flash-lite
+  const models = ['gemini-3.8-flash', 'gemini-flash-latest', 'gemini-3.1-flash-lite'];
   let lastError: any = null;
 
   for (const model of models) {
@@ -413,8 +413,11 @@ const handleKeyStatus = (_req: any, res: any) => {
   });
 };
 app.get('/api/key-status', handleKeyStatus);
+app.post('/api/key-status', handleKeyStatus);
 app.get('/api/gemini/status', handleKeyStatus);
+app.post('/api/gemini/status', handleKeyStatus);
 app.get('/api/gemini/key-status', handleKeyStatus);
+app.post('/api/gemini/key-status', handleKeyStatus);
 
 // 1. Health check & API key validation
 const handleValidateKey = async (req: any, res: any) => {
@@ -430,7 +433,7 @@ const handleValidateKey = async (req: any, res: any) => {
         primaryClient,
         'Ping: Jawab persis 1 kata: SIAP',
         undefined,
-        10000,
+        4000,
         fallbackClient
       );
       pingSuccess = true;
@@ -1275,6 +1278,48 @@ app.get('/api/cbt/sessions', (_req, res) => {
       sessions: db.sessions || [],
       activePings: Object.values(activePings),
       lastUpdated: db.lastUpdated,
+    });
+  } catch (e: any) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// F2. Get single student session by ID
+app.get('/api/cbt/sessions/:id', (req, res) => {
+  try {
+    const { id } = req.params;
+    const db = readServerDB();
+    const session = db.sessions.find((s: any) => s.id === id || s.studentId === id);
+    if (!session) {
+      return res.status(404).json({ success: false, error: 'Sesi siswa tidak ditemukan di server' });
+    }
+    res.json({ success: true, session });
+  } catch (e: any) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// F3. Teacher updates a student session (e.g. manual score adjustment)
+app.put('/api/cbt/sessions/:id', (req, res) => {
+  try {
+    const { id } = req.params;
+    const { updatedSession } = req.body;
+    if (!updatedSession) {
+      return res.status(400).json({ success: false, error: 'Data sesi pembaruan tidak valid' });
+    }
+    const db = readServerDB();
+    const index = db.sessions.findIndex((s: any) => s.id === id || s.studentId === id);
+    let updatedSessions = [...db.sessions];
+    if (index >= 0) {
+      updatedSessions[index] = { ...updatedSessions[index], ...updatedSession, updatedAt: new Date().toISOString() };
+    } else {
+      updatedSessions.push({ ...updatedSession, updatedAt: new Date().toISOString() });
+    }
+    writeServerDB({ sessions: updatedSessions });
+    res.json({
+      success: true,
+      message: 'Sesi siswa berhasil diperbarui di server',
+      session: updatedSessions[index >= 0 ? index : updatedSessions.length - 1],
     });
   } catch (e: any) {
     res.status(500).json({ success: false, error: e.message });

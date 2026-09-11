@@ -38,16 +38,10 @@ async function safeParseResponse(res: Response, defaultError: string, endpointNa
         throw new Error(
           `Layanan Google Apps Script mengembalikan status 404 (Not Found).\n\n1. Pastikan opsi 'Who has access' disetel ke 'Anyone' (Siapa saja).\n2. Pastikan menyalin Web App URL berakhiran '/exec' (bukan /edit atau /dev).\n3. Pastikan memilih 'New version' saat deployment.`
         );
-      } else if (
-        endpointName?.includes('gemini') ||
-        endpointName?.includes('validate') ||
-        endpointName?.includes('generate-questions')
-      ) {
-        throw new Error(
-          `Endpoint layanan AI (${endpointName || '/api/gemini'}) mengembalikan status 404 (Not Found). Pastikan backend aktif dan rute API terdaftar.`
-        );
       } else {
-        throw new Error(`Endpoint ${endpointName || 'layanan'} mengembalikan status 404 (Not Found). Pastikan backend aktif.`);
+        throw new Error(
+          `Layanan backend sedang memuat ulang rute (Status 404 pada ${endpointName || 'layanan'}). Silakan coba kembali dalam beberapa detik.`
+        );
       }
     }
 
