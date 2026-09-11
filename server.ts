@@ -27,7 +27,7 @@ const PORT = 3000;
 app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin, x-api-key');
   if (req.method === 'OPTIONS') {
     return res.sendStatus(204);
   }
@@ -242,7 +242,7 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, timeoutMsg: stri
 }
 
 // Generate content with automatic model fallback and timeout protection
-async function generateWithFallback(client: GoogleGenAI, contents: any, config?: any, timeoutMs = 25000, fallbackClient?: GoogleGenAI) {
+async function generateWithFallback(client: GoogleGenAI, contents: any, config?: any, timeoutMs = 45000, fallbackClient?: GoogleGenAI) {
   // Use approved models: gemini-3.8-flash, gemini-flash-latest, gemini-3.1-flash-lite
   const models = ['gemini-3.8-flash', 'gemini-flash-latest', 'gemini-3.1-flash-lite'];
   let lastError: any = null;
@@ -499,17 +499,17 @@ app.get(validateRoutes, (_req, res) => {
 app.post(validateRoutes, handleValidateKey);
 app.all(validateRoutes, handleValidateKey);
 
-// GET status for /api/generate-questions
-app.get('/api/generate-questions', (_req, res) => {
-  res.json({
-    success: true,
-    status: 'ok',
-    message: 'Endpoint /api/generate-questions aktif. Gunakan metode POST dengan parameter { subject, grade, coreMaterial, ... } untuk membuat soal dengan AI.',
-  });
-});
-
 // 2. Generate questions with Gemini AI
-app.post('/api/generate-questions', async (req, res) => {
+const generateQuestionsRoutes = [
+  '/api/generate-questions',
+  '/api/generate-questions/',
+  '/api/gemini/generate-questions',
+  '/api/gemini/generate-questions/',
+  '/api/cbt/generate-questions',
+  '/api/cbt/generate-questions/',
+];
+
+const handleGenerateQuestions = async (req: any, res: any) => {
   try {
     const {
       apiKey,
@@ -522,19 +522,19 @@ app.post('/api/generate-questions', async (req, res) => {
       count = 5,
       types = ['pilihan_ganda', 'pilihan_ganda_kompleks', 'isian_singkat', 'uraian'],
       customPrompt = '',
-    } = req.body;
+    } = req.body || {};
 
     const { primaryClient, fallbackClient } = getClients(apiKey);
 
     const prompt = `Anda adalah seorang pakar kurikulum dan guru pembuat soal ujian profesional di Indonesia.
 Buatkan ${count} butir soal ujian interaktif berkualitas tinggi dengan rincian berikut:
-- Mata Pelajaran: ${subject}
-- Tingkat/Kelas: ${grade}
-- Semester: ${semester}
-- Tujuan Pembelajaran / Tujuan Pendidikan: ${educationGoal}
-- Materi Pokok / Topik: ${coreMaterial}
+- Mata Pelajaran: ${subject || 'Umum'}
+- Tingkat/Kelas: ${grade || 'Umum'}
+- Semester: ${semester || '1'}
+- Tujuan Pembelajaran / Tujuan Pendidikan: ${educationGoal || 'Pemahaman materi pokok'}
+- Materi Pokok / Topik: ${coreMaterial || 'Kompetensi dasar'}
 - Tingkat Kesulitan: ${difficulty} (sesuaikan indikator kognitif / HOTS bila sedang/sukar)
-- Jenis Soal yang diminta: ${types.join(', ')}
+- Jenis Soal yang diminta: ${Array.isArray(types) ? types.join(', ') : 'pilihan_ganda, isian_singkat'}
 ${customPrompt ? `- Menu Prompt / Instruksi Khusus dari Guru:\n"${customPrompt}"` : ''}
 
 Format soal yang harus didukung:
@@ -565,7 +565,7 @@ Wajib kembalikan HANYA JSON murni (valid RFC 8259) tanpa komentar dan tanpa pemb
       {
         responseMimeType: 'application/json',
       },
-      25000,
+      45000,
       fallbackClient
     );
 
@@ -580,23 +580,34 @@ Wajib kembalikan HANYA JSON murni (valid RFC 8259) tanpa komentar dan tanpa pemb
   } catch (error: any) {
     console.error('Error generating questions:', error);
     const friendlyError = formatGeminiError(error);
-    res.status(500).json({ success: false, error: friendlyError });
+    res.status(500).json({ success: false, error: friendlyError, message: friendlyError });
   }
-});
+};
 
-// GET status for /api/evaluate-submission
-app.get('/api/evaluate-submission', (_req, res) => {
+app.get(generateQuestionsRoutes, (_req, res) => {
   res.json({
     success: true,
     status: 'ok',
-    message: 'Endpoint /api/evaluate-submission aktif. Gunakan metode POST dengan parameter { type, question, studentAnswer, rubric } untuk evaluasi jawaban.',
+    message: 'Endpoint generate-questions aktif. Gunakan metode POST dengan parameter { subject, grade, coreMaterial, ... } untuk membuat soal dengan AI.',
   });
 });
 
+app.post(generateQuestionsRoutes, handleGenerateQuestions);
+app.all(generateQuestionsRoutes, handleGenerateQuestions);
+
 // 3. Automated scoring for short answers and essays using AI with user-defined rubric
-app.post('/api/evaluate-submission', async (req, res) => {
+const evaluateSubmissionRoutes = [
+  '/api/evaluate-submission',
+  '/api/evaluate-submission/',
+  '/api/gemini/evaluate-submission',
+  '/api/gemini/evaluate-submission/',
+  '/api/cbt/evaluate-submission',
+  '/api/cbt/evaluate-submission/',
+];
+
+const handleEvaluateSubmission = async (req: any, res: any) => {
   try {
-    const { apiKey, type = 'isian_singkat', question, studentAnswer, expectedAnswer, keywords, concept, rubric, maxScore } = req.body;
+    const { apiKey, type = 'isian_singkat', question, studentAnswer, expectedAnswer, keywords, concept, rubric, maxScore } = req.body || {};
 
     const trimmedAnswer = (studentAnswer || '').trim();
     if (!trimmedAnswer) {
@@ -611,7 +622,7 @@ app.post('/api/evaluate-submission', async (req, res) => {
       });
     }
 
-    const client = getGenAIClient(apiKey);
+    const { primaryClient, fallbackClient } = getClients(apiKey);
 
     const isIsian = type === 'isian_singkat';
     const isUraian = type === 'uraian';
@@ -654,9 +665,9 @@ Kembalikan HANYA JSON valid RFC 8259 (tanpa markdown tambahan):
   "matchedKeywords": ["kata kunci atau sinonim yang ditemukan"]
 }`;
 
-    const response = await generateWithFallback(client, prompt, {
+    const response = await generateWithFallback(primaryClient, prompt, {
       responseMimeType: 'application/json',
-    });
+    }, 45000, fallbackClient);
 
     const rawText = response.text || '{}';
     const evaluation = extractJsonFromText(rawText, {
@@ -670,9 +681,20 @@ Kembalikan HANYA JSON valid RFC 8259 (tanpa markdown tambahan):
   } catch (error: any) {
     console.error('Error evaluating submission:', error);
     const friendlyError = formatGeminiError(error);
-    res.status(500).json({ success: false, error: friendlyError });
+    res.status(500).json({ success: false, error: friendlyError, message: friendlyError });
   }
+};
+
+app.get(evaluateSubmissionRoutes, (_req, res) => {
+  res.json({
+    success: true,
+    status: 'ok',
+    message: 'Endpoint evaluate-submission aktif. Gunakan metode POST dengan parameter { type, question, studentAnswer, rubric } untuk evaluasi jawaban.',
+  });
 });
+
+app.post(evaluateSubmissionRoutes, handleEvaluateSubmission);
+app.all(evaluateSubmissionRoutes, handleEvaluateSubmission);
 
 // 3B. Endpoints for EduCBT / Riwayat Soal (Server filesystem archive)
 app.get('/api/educbt/archive-questions', (_req, res) => {
@@ -739,31 +761,31 @@ app.get('/api/educbt/archives', (_req, res) => {
   }
 });
 
-// GET status for /api/generate-remedial-enrichment
-app.get('/api/generate-remedial-enrichment', (_req, res) => {
-  res.json({
-    success: true,
-    status: 'ok',
-    message: 'Endpoint /api/generate-remedial-enrichment aktif. Gunakan POST { studentName, subject, finalScore, kkm } untuk generate rekomendasi remedial.',
-  });
-});
-
 // 4. AI Remedial & Enrichment generation based on exam results
-app.post('/api/generate-remedial-enrichment', async (req, res) => {
-  try {
-    const { apiKey, studentName, subject, finalScore, kkm = 75, weakTopics = [], strongTopics = [] } = req.body;
+const remedialEnrichmentRoutes = [
+  '/api/generate-remedial-enrichment',
+  '/api/generate-remedial-enrichment/',
+  '/api/gemini/generate-remedial-enrichment',
+  '/api/gemini/generate-remedial-enrichment/',
+  '/api/cbt/generate-remedial-enrichment',
+  '/api/cbt/generate-remedial-enrichment/',
+];
 
-    const client = getGenAIClient(apiKey);
-    const isRemedial = finalScore < kkm;
+const handleRemedialEnrichment = async (req: any, res: any) => {
+  try {
+    const { apiKey, studentName, subject, finalScore, kkm = 75, weakTopics = [], strongTopics = [] } = req.body || {};
+
+    const { primaryClient, fallbackClient } = getClients(apiKey);
+    const isRemedial = Number(finalScore) < Number(kkm);
 
     const prompt = `Anda adalah konsultan pedagogi dan guru pembimbing akademik.
 Berdasarkan hasil ujian siswa berikut:
-- Nama Siswa: ${studentName}
-- Mata Pelajaran: ${subject}
+- Nama Siswa: ${studentName || 'Siswa'}
+- Mata Pelajaran: ${subject || 'Pelajaran'}
 - Nilai Akhir: ${finalScore} / 100 (KKM: ${kkm})
 - Status: ${isRemedial ? 'BELUM TUNTAS (Perlu Remidi)' : 'TUNTAS (Memerlukan Pengayaan)'}
-- Topik Lemah: ${weakTopics.join(', ') || 'Pemahaman menyeluruh'}
-- Topik Kuat: ${strongTopics.join(', ') || 'Dasar-dasar materi'}
+- Topik Lemah: ${Array.isArray(weakTopics) ? weakTopics.join(', ') : 'Pemahaman menyeluruh'}
+- Topik Kuat: ${Array.isArray(strongTopics) ? strongTopics.join(', ') : 'Dasar-dasar materi'}
 
 Buatkan rencana program pembelajaran khusus ${isRemedial ? 'REMIDIAL' : 'PENGAYAAN'} yang dipersonalisasi.
 Kembalikan HANYA JSON murni (valid RFC 8259):
@@ -787,9 +809,9 @@ Kembalikan HANYA JSON murni (valid RFC 8259):
   "motivationQuote": "Kalimat motivasi positif untuk siswa"
 }`;
 
-    const response = await generateWithFallback(client, prompt, {
+    const response = await generateWithFallback(primaryClient, prompt, {
       responseMimeType: 'application/json',
-    });
+    }, 45000, fallbackClient);
 
     const rawText = response.text || '{}';
     const program = extractJsonFromText(rawText, {
@@ -806,24 +828,35 @@ Kembalikan HANYA JSON murni (valid RFC 8259):
   } catch (error: any) {
     console.error('Error generating remedial/enrichment:', error);
     const friendlyError = formatGeminiError(error);
-    res.status(500).json({ success: false, error: friendlyError });
+    res.status(500).json({ success: false, error: friendlyError, message: friendlyError });
   }
-});
+};
 
-// GET status for /api/analyze-exam-results
-app.get('/api/analyze-exam-results', (_req, res) => {
+app.get(remedialEnrichmentRoutes, (_req, res) => {
   res.json({
     success: true,
     status: 'ok',
-    message: 'Endpoint /api/analyze-exam-results aktif. Gunakan POST { examTitle, subject, grade, avgScore, passRate } untuk analisis hasil ujian.',
+    message: 'Endpoint generate-remedial-enrichment aktif. Gunakan POST { studentName, subject, finalScore, kkm } untuk generate rekomendasi remedial.',
   });
 });
 
+app.post(remedialEnrichmentRoutes, handleRemedialEnrichment);
+app.all(remedialEnrichmentRoutes, handleRemedialEnrichment);
+
 // 5. Comprehensive AI Exam & Item Analysis for Teacher Decision Making
-app.post('/api/analyze-exam-results', async (req, res) => {
+const analyzeExamRoutes = [
+  '/api/analyze-exam-results',
+  '/api/analyze-exam-results/',
+  '/api/gemini/analyze-exam-results',
+  '/api/gemini/analyze-exam-results/',
+  '/api/cbt/analyze-exam-results',
+  '/api/cbt/analyze-exam-results/',
+];
+
+const handleAnalyzeExamResults = async (req: any, res: any) => {
   try {
-    const { apiKey, examTitle, subject, grade, avgScore, passRate, hardQuestions, summaryStats } = req.body;
-    const client = getGenAIClient(apiKey);
+    const { apiKey, examTitle, subject, grade, avgScore, passRate, hardQuestions, summaryStats } = req.body || {};
+    const { primaryClient, fallbackClient } = getClients(apiKey);
 
     const prompt = `Anda adalah ahli psikometri asesmen pendidikan dan konsultan kurikulum sekolah.
 Lakukan evaluasi analisis hasil ujian dan analisis butir soal secara mendalam berdasarkan data berikut:
@@ -849,9 +882,9 @@ Berikan analisis pedagogis menyeluruh dalam format JSON murni:
   ]
 }`;
 
-    const response = await generateWithFallback(client, prompt, {
+    const response = await generateWithFallback(primaryClient, prompt, {
       responseMimeType: 'application/json',
-    });
+    }, 45000, fallbackClient);
 
     const rawText = response.text || '{}';
     const analysis = extractJsonFromText(rawText, {
@@ -867,9 +900,20 @@ Berikan analisis pedagogis menyeluruh dalam format JSON murni:
   } catch (error: any) {
     console.error('Error analyzing exam results:', error);
     const friendlyError = formatGeminiError(error);
-    res.status(500).json({ success: false, error: friendlyError });
+    res.status(500).json({ success: false, error: friendlyError, message: friendlyError });
   }
+};
+
+app.get(analyzeExamRoutes, (_req, res) => {
+  res.json({
+    success: true,
+    status: 'ok',
+    message: 'Endpoint analyze-exam-results aktif. Gunakan POST { examTitle, subject, grade, avgScore, passRate } untuk analisis hasil ujian.',
+  });
 });
+
+app.post(analyzeExamRoutes, handleAnalyzeExamResults);
+app.all(analyzeExamRoutes, handleAnalyzeExamResults);
 
 // 6. Proxy sync to Google Apps Script Web App (if teacher configures a GAS Web App URL)
 app.get('/api/sync-gas', (_req, res) => {

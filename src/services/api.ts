@@ -144,31 +144,56 @@ export const apiService = {
 
   async generateQuestions(params: GenerateQuestionsParams): Promise<any> {
     const apiKey = this.getStoredApiKey();
-    console.info('[API Request] /api/generate-questions', {
+    console.info('[API Request] generateQuestions', {
       subject: params.subject,
       grade: params.grade,
       count: params.count,
       types: params.types,
       hasApiKey: !!apiKey,
     });
-    const res = await fetch('/api/generate-questions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        apiKey,
-        ...params,
-      }),
-    });
-    const data = await safeParseResponse(res, 'Gagal generate soal', '/api/generate-questions');
-    console.info('[API Response] /api/generate-questions', {
-      status: res.status,
-      success: data?.success,
-      count: data?.questions?.length || 0,
-    });
-    if (!data.success) {
-      throw new Error(data.error || 'Gagal generate soal');
+
+    const candidateEndpoints = [
+      '/api/generate-questions',
+      '/api/gemini/generate-questions',
+      '/api/cbt/generate-questions',
+    ];
+
+    let lastError = '';
+    for (let attempt = 0; attempt < candidateEndpoints.length; attempt++) {
+      const endpoint = candidateEndpoints[attempt];
+      try {
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+          },
+          body: JSON.stringify({
+            apiKey,
+            ...params,
+          }),
+        });
+
+        const data = await safeParseResponse(res, 'Gagal generate soal', endpoint);
+        if (data && data.success && Array.isArray(data.questions)) {
+          console.info(`[API Response] ${endpoint} success (${data.questions.length} butir)`);
+          return data.questions;
+        }
+
+        if (data && data.error) {
+          throw new Error(data.error);
+        }
+      } catch (err: any) {
+        lastError = err?.message || 'Gagal memproses soal';
+        console.warn(`[API generateQuestions] Percobaan endpoint "${endpoint}" kendala:`, lastError);
+        // If it's a 404 or connection issue, try next endpoint after a brief pause
+        if (attempt < candidateEndpoints.length - 1) {
+          await new Promise((resolve) => setTimeout(resolve, 600));
+        }
+      }
     }
-    return data.questions;
+
+    throw new Error(lastError || 'Gagal membuat soal dengan AI. Silakan periksa kunci API atau coba sesaat lagi.');
   },
 
   async analyzeExamResults(params: {
@@ -181,19 +206,42 @@ export const apiService = {
     summaryStats: any;
   }): Promise<any> {
     const apiKey = this.getStoredApiKey();
-    const res = await fetch('/api/analyze-exam-results', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        apiKey,
-        ...params,
-      }),
-    });
-    const data = await safeParseResponse(res, 'Gagal menganalisis hasil ujian', '/api/analyze-exam-results');
-    if (!data.success) {
-      throw new Error(data.error || 'Gagal menganalisis hasil ujian');
+    const candidateEndpoints = [
+      '/api/analyze-exam-results',
+      '/api/gemini/analyze-exam-results',
+      '/api/cbt/analyze-exam-results',
+    ];
+
+    let lastError = '';
+    for (let attempt = 0; attempt < candidateEndpoints.length; attempt++) {
+      const endpoint = candidateEndpoints[attempt];
+      try {
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+          },
+          body: JSON.stringify({
+            apiKey,
+            ...params,
+          }),
+        });
+        const data = await safeParseResponse(res, 'Gagal menganalisis hasil ujian', endpoint);
+        if (data && data.success && data.analysis) {
+          return data.analysis;
+        }
+        if (data && data.error) {
+          throw new Error(data.error);
+        }
+      } catch (err: any) {
+        lastError = err?.message || 'Gagal analisis ujian';
+        if (attempt < candidateEndpoints.length - 1) {
+          await new Promise((resolve) => setTimeout(resolve, 600));
+        }
+      }
     }
-    return data.analysis;
+    throw new Error(lastError || 'Gagal menganalisis hasil ujian');
   },
 
   async evaluateAnswer(params: {
@@ -207,19 +255,42 @@ export const apiService = {
     maxScore: number;
   }): Promise<{ awardedScore: number; maxScore: number; feedback: string; matchedKeywords?: string[] }> {
     const apiKey = this.getStoredApiKey();
-    const res = await fetch('/api/evaluate-submission', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        apiKey,
-        ...params,
-      }),
-    });
-    const data = await safeParseResponse(res, 'Gagal evaluasi jawaban', '/api/evaluate-submission');
-    if (!data.success) {
-      throw new Error(data.error || 'Gagal evaluasi jawaban');
+    const candidateEndpoints = [
+      '/api/evaluate-submission',
+      '/api/gemini/evaluate-submission',
+      '/api/cbt/evaluate-submission',
+    ];
+
+    let lastError = '';
+    for (let attempt = 0; attempt < candidateEndpoints.length; attempt++) {
+      const endpoint = candidateEndpoints[attempt];
+      try {
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+          },
+          body: JSON.stringify({
+            apiKey,
+            ...params,
+          }),
+        });
+        const data = await safeParseResponse(res, 'Gagal evaluasi jawaban', endpoint);
+        if (data && data.success && data.evaluation) {
+          return data.evaluation;
+        }
+        if (data && data.error) {
+          throw new Error(data.error);
+        }
+      } catch (err: any) {
+        lastError = err?.message || 'Gagal evaluasi jawaban';
+        if (attempt < candidateEndpoints.length - 1) {
+          await new Promise((resolve) => setTimeout(resolve, 600));
+        }
+      }
     }
-    return data.evaluation;
+    throw new Error(lastError || 'Gagal evaluasi jawaban');
   },
 
   // Archive exam questions to EduCBT/Riwayat Soal on the server
@@ -255,19 +326,42 @@ export const apiService = {
     strongTopics?: string[];
   }): Promise<any> {
     const apiKey = this.getStoredApiKey();
-    const res = await fetch('/api/generate-remedial-enrichment', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        apiKey,
-        ...params,
-      }),
-    });
-    const data = await safeParseResponse(res, 'Gagal membuat program remidi/pengayaan', '/api/generate-remedial-enrichment');
-    if (!data.success) {
-      throw new Error(data.error || 'Gagal membuat program remidi/pengayaan');
+    const candidateEndpoints = [
+      '/api/generate-remedial-enrichment',
+      '/api/gemini/generate-remedial-enrichment',
+      '/api/cbt/generate-remedial-enrichment',
+    ];
+
+    let lastError = '';
+    for (let attempt = 0; attempt < candidateEndpoints.length; attempt++) {
+      const endpoint = candidateEndpoints[attempt];
+      try {
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+          },
+          body: JSON.stringify({
+            apiKey,
+            ...params,
+          }),
+        });
+        const data = await safeParseResponse(res, 'Gagal membuat program remidi/pengayaan', endpoint);
+        if (data && data.success && data.program) {
+          return data.program;
+        }
+        if (data && data.error) {
+          throw new Error(data.error);
+        }
+      } catch (err: any) {
+        lastError = err?.message || 'Gagal membuat program remidi/pengayaan';
+        if (attempt < candidateEndpoints.length - 1) {
+          await new Promise((resolve) => setTimeout(resolve, 600));
+        }
+      }
     }
-    return data.program;
+    throw new Error(lastError || 'Gagal membuat program remidi/pengayaan');
   },
 
   async syncWithGAS(action: string, payload: any, webAppUrl?: string): Promise<any> {
